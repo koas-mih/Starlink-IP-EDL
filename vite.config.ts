@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs/promises';
+import { mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import { existsSync } from 'fs';
 
@@ -22,13 +23,13 @@ const ipAddressFilePlugin = () => {
       // Ensure data directory exists
       const dataDir = path.join(process.cwd(), 'data');
       if (!existsSync(dataDir)) {
-        fs.mkdir(dataDir, { recursive: true });
+        mkdirSync(dataDir, { recursive: true });
       }
 
       // Ensure ipData.json exists
       const ipDataPath = path.join(dataDir, 'ipData.json');
       if (!existsSync(ipDataPath)) {
-        fs.writeFile(ipDataPath, JSON.stringify({
+        writeFileSync(ipDataPath, JSON.stringify({
           lastUpdated: null,
           ipAddresses: [],
           updateInterval: 60,
