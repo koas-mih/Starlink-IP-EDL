@@ -128,12 +128,12 @@ const ipAddressFilePlugin = () => {
                 res.end(JSON.stringify({ success: false, error: 'Failed to update IP file' }));
               }
             });
+            return;
           } catch (error) {
             console.error('Error processing update request:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ success: false, error: 'Server error' }));
           }
-          return;
         }
         
         // Handle /api/last-updated endpoint
@@ -233,12 +233,12 @@ const ipAddressFilePlugin = () => {
                 res.end(JSON.stringify({ error: 'Failed to update changelog' }));
               }
             });
+            return;
           } catch (error) {
             console.error('Error processing changelog update:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'Server error' }));
           }
-          return;
         }
         
         // Handle SSE connections
@@ -316,12 +316,12 @@ const ipAddressFilePlugin = () => {
                 res.end(JSON.stringify({ error: 'Failed to update interval' }));
               }
             });
+            return;
           } catch (error) {
             console.error('Error processing interval update:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'Server error' }));
           }
-          return;
         }
         
         // Handle /api/settings endpoint
