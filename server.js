@@ -133,7 +133,8 @@ async function updateIPAddresses() {
       console.log('Background task: Attempting direct fetch...');
       const response = await fetch(STARLINK_CSV_URL, {
         headers: {
-          'Accept': 'text/plain,text/csv,*/*'
+          'Accept': 'text/plain,text/csv,*/*',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
       });
       
@@ -159,7 +160,12 @@ async function updateIPAddresses() {
             proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}`;
           }
           
-          const response = await fetch(proxyUrl);
+          const response = await fetch(proxyUrl, {
+            headers: {
+              'Accept': 'text/plain,text/csv,*/*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+          });
           
           if (!response.ok) continue;
           
@@ -349,6 +355,36 @@ app.get('/api/last-updated', (req, res) => {
   }
 });
 
+app.post('/api/trigger-update', async (req, res) => {
+  try {
+    console.log('Manual update triggered by user');
+    
+    // Check if an update is already in progress
+    if (lastUpdateTime && (Date.now() - lastUpdateTime) < MIN_UPDATE_INTERVAL) {
+      return res.status(429).json({ 
+        error: 'Update already in progress or too recent',
+        lastUpdated: new Date(lastUpdateTime).toISOString()
+      });
+    }
+    
+    // Trigger the update function
+    await updateIPAddresses();
+    
+    // Return success response
+    res.json({ 
+      success: true,
+      message: 'Update triggered successfully',
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error triggering manual update:', error);
+    res.status(500).json({ 
+      error: 'Failed to trigger update',
+      message: error.message 
+    });
+  }
+});
 app.post('/api/update-interval', (req, res) => {
   try {
     const { interval, autoUpdateEnabled } = req.body;

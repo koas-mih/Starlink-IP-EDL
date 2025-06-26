@@ -1,15 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const STARLINK_CSV_URL = 'https://geoip.starlinkisp.net/feed.csv';
-
-// Use a predefined list of CORS proxies to try
-const corsProxies = [
-  'https://corsproxy.io/?',
-  'https://proxy.cors.sh/',
-  'https://api.allorigins.win/raw?url=',
-  'https://cors-proxy.htmldriven.com/?url='
-];
-
 export interface ChangelogEntry {
   date: string;
   ipAddresses: string[];
@@ -48,102 +38,6 @@ export const useStarlinkData = () => {
     } catch (error) {
       console.error('Error fetching changelog:', error);
     }
-  };
-
-  // Function to try fetching with different proxies
-  const tryNextProxy = async (url: string, attempt = 0): Promise<string | null> => {
-    if (attempt >= corsProxies.length) {
-      console.warn(`Failed to fetch Starlink IP data after trying ${corsProxies.length} different proxies`);
-      return null;
-    }
-
-    const proxy = corsProxies[attempt];
-    console.log(`Trying proxy ${attempt + 1}/${corsProxies.length}: ${proxy}`);
-    
-    try {
-      let proxyUrl;
-      if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-        proxyUrl = `${proxy}${encodeURIComponent(url)}&key=&mime=text/plain`;
-      } else if (proxy === 'https://corsproxy.io/?') {
-        proxyUrl = `${proxy}${url}`;
-      } else {
-        proxyUrl = `${proxy}${encodeURIComponent(url)}`;
-      }
-      
-      console.log(`Attempting proxy fetch with URL: ${proxyUrl}`);
-      
-      const response = await fetchWithTimeout(proxyUrl, 30000, {
-        headers: {
-          'Accept': 'text/plain,text/csv,*/*',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Proxy ${attempt + 1} failed with: ${response.status}`);
-      }
-      
-      if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-        const data = await response.json();
-        return data.contents;
-      }
-      
-      return await response.text();
-    } catch (error) {
-      console.log(`Proxy ${attempt + 1} failed:`, error);
-      return tryNextProxy(url, attempt + 1);
-    }
-  };
-
-  // Improved fetch with timeout function
-  const fetchWithTimeout = async (url: string, timeout = 30000, options: RequestInit = {}) => {
-    const controller = new AbortController();
-    const signal = controller.signal;
-    
-    const timeoutPromise = new Promise<Response>((_, reject) => {
-      const timeoutId = setTimeout(() => {
-        clearTimeout(timeoutId);
-        controller.abort();
-        reject(new Error(`Request timed out after ${timeout}ms`));
-      }, timeout);
-    });
-    
-    try {
-      const response = await Promise.race([
-        fetch(url, { ...options, signal }),
-        timeoutPromise
-      ]);
-      
-      return response;
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  // Function to process CSV data and extract IP addresses
-  const processCSVData = (csvText: string) => {
-    if (!csvText || typeof csvText !== 'string') {
-      throw new Error('Received invalid or empty CSV data');
-    }
-    
-    const lines = csvText.split('\n');
-    const ipv4List: string[] = [];
-    
-    lines.forEach(line => {
-      const cells = line.split(',');
-      cells.forEach(cell => {
-        const match = cell.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2})/);
-        if (match) {
-          ipv4List.push(match[0]);
-        }
-      });
-    });
-    
-    if (ipv4List.length === 0) {
-      throw new Error('No IPv4 CIDR addresses found in the CSV file.');
-    }
-    
-    return ipv4List;
   };
 
   // Function to safely set success state with proper timeout
@@ -199,41 +93,7 @@ export const useStarlinkData = () => {
     }
   };
 
-  // Function to update changelog with new IP addresses
-  const updateChangelog = (newIpAddresses: string[]) => {
-    if (ipAddresses.length > 0) {
-      const currentSet = new Set(ipAddresses);
-      const newSet = new Set(newIpAddresses);
-      
-      const added = newIpAddresses.filter(ip => !currentSet.has(ip));
-      const removed = ipAddresses.filter(ip => !newSet.has(ip));
-      
-      if (added.length > 0 || removed.length > 0) {
-        const entry: ChangelogEntry = {
-          date: new Date().toISOString(),
-          ipAddresses: [...newIpAddresses],
-          added,
-          removed
-        };
-        
-        fetch('/api/update-changelog', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ entry })
-        })
-        .then(() => {
-          fetchChangelog();
-        })
-        .catch(err => {
-          console.error('Error updating changelog:', err);
-        });
-      }
-    }
-  };
-
-  // Define fetchData before it's used in any effects or other functions
+  // Define fetchData - now uses server-side fetching
   const fetchData = useCallback(async () => {
     if (isFetchingRef.current) {
       console.log('Fetch already in progress, skipping...');
@@ -245,64 +105,47 @@ export const useStarlinkData = () => {
       setIsLoading(true);
       setError('');
       
-      const csvText = await tryNextProxy(STARLINK_CSV_URL);
-      let newIpAddresses: string[] = [];
+      // Trigger server-side update
+      const response = await fetch('/api/trigger-update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
       
-      if (csvText) {
-        try {
-          newIpAddresses = processCSVData(csvText);
-        } catch (csvError) {
-          console.error('Error processing CSV data:', csvError);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Server responded with ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log('Server update triggered successfully:', result);
+      
+      // Wait a moment for the server to process
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Load the updated data from server
+      await loadLatestDataFromServer(true);
+      
+      // Update last updated time
+      const timeResponse = await fetch('/api/last-updated');
+      if (timeResponse.ok) {
+        const timeData = await timeResponse.json();
+        if (timeData.lastUpdated) {
+          setLastUpdated(timeData.lastUpdated);
+          localStorage.setItem('lastUpdated', timeData.lastUpdated);
         }
       }
       
-      if (newIpAddresses.length === 0) {
-        const storedIps = localStorage.getItem('ipAddresses');
-        if (storedIps) {
-          newIpAddresses = JSON.parse(storedIps);
-          console.log('Using cached IP addresses from localStorage');
-        }
-      }
+      // Refresh changelog
+      fetchChangelog();
       
-      if (newIpAddresses.length > 0) {
-        const response = await fetch('/api/update-ip-file', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ 
-            forceUpdate: true,
-            ipAddresses: newIpAddresses
-          })
-        });
-        
-        if (response.ok) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          await loadLatestDataFromServer(true);
-          
-          const timeResponse = await fetch('/api/last-updated');
-          if (timeResponse.ok) {
-            const timeData = await timeResponse.json();
-            if (timeData.lastUpdated) {
-              setLastUpdated(timeData.lastUpdated);
-              localStorage.setItem('lastUpdated', timeData.lastUpdated);
-            }
-          }
-          
-          fetchChangelog();
-        } else {
-          const errorData = await response.json();
-          throw new Error(`Failed to trigger server update: ${errorData.error || 'Unknown error'}`);
-        }
-      } else {
-        throw new Error('No IP addresses available - both fetch and cache failed');
-      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
       setError(errorMessage);
       console.error('Fetch error:', errorMessage);
       
+      // Try to load cached data if available
       const storedIps = localStorage.getItem('ipAddresses');
       if (storedIps && ipAddresses.length === 0) {
         setIpAddresses(JSON.parse(storedIps));
