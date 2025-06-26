@@ -20,6 +20,7 @@ export const useStarlinkData = () => {
   useEffect(() => {
     const storedIps = localStorage.getItem('starlink_ipAddresses');
     const storedTime = localStorage.getItem('starlink_lastUpdated');
+    const storedChangelog = localStorage.getItem('starlink_changelog');
     
     if (storedIps) {
       try {
@@ -29,6 +30,7 @@ export const useStarlinkData = () => {
         }
       } catch (e) {
         console.error('Error parsing stored IP addresses:', e);
+        localStorage.removeItem('starlink_ipAddresses');
       }
     }
     
@@ -36,8 +38,6 @@ export const useStarlinkData = () => {
       setLastUpdated(storedTime);
     }
 
-    // Load changelog
-    const storedChangelog = localStorage.getItem('starlink_changelog');
     if (storedChangelog) {
       try {
         const parsedChangelog = JSON.parse(storedChangelog);
@@ -46,6 +46,7 @@ export const useStarlinkData = () => {
         }
       } catch (e) {
         console.error('Error parsing stored changelog:', e);
+        localStorage.removeItem('starlink_changelog');
       }
     }
   }, []);
@@ -75,6 +76,37 @@ export const useStarlinkData = () => {
     setTimeout(() => setFetchSuccess(false), 3000);
   }, []);
 
+  // Load current data from server
+  const loadCurrentData = useCallback(async () => {
+    try {
+      const response = await fetch('/api/data');
+      
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Server returned non-JSON response');
+      }
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setIpAddresses(data.ipAddresses || []);
+      setLastUpdated(data.lastUpdated);
+      setChangelog(data.changelog || []);
+      
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
+      console.error('Error loading current data:', errorMessage);
+      setError(`Failed to load data: ${errorMessage}`);
+    }
+  }, []);
+
   // Main fetch function
   const fetchData = useCallback(async () => {
     if (isLoading) return;
@@ -92,24 +124,20 @@ export const useStarlinkData = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Server returned non-JSON response');
       }
 
       const result = await response.json();
       
       if (result.success) {
-        // Get the updated data
-        const dataResponse = await fetch('/api/data');
-        
-        if (dataResponse.ok) {
-          const data = await dataResponse.json();
-          
-          setIpAddresses(data.ipAddresses || []);
-          setLastUpdated(data.lastUpdated);
-          setChangelog(data.changelog || []);
-          
-          showSuccessMessage();
-        }
+        // Reload the data
+        await loadCurrentData();
+        showSuccessMessage();
       } else {
         throw new Error(result.error || 'Unknown error occurred');
       }
@@ -121,22 +149,7 @@ export const useStarlinkData = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, showSuccessMessage]);
-
-  // Load current data from server without fetching new
-  const loadCurrentData = useCallback(async () => {
-    try {
-      const response = await fetch('/api/data');
-      if (response.ok) {
-        const data = await response.json();
-        setIpAddresses(data.ipAddresses || []);
-        setLastUpdated(data.lastUpdated);
-        setChangelog(data.changelog || []);
-      }
-    } catch (err) {
-      console.error('Error loading current data:', err);
-    }
-  }, []);
+  }, [isLoading, showSuccessMessage, loadCurrentData]);
 
   // Load current data on mount
   useEffect(() => {

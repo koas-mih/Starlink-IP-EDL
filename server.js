@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 const publicDir = resolve(__dirname, 'public');
 const dataDir = resolve(__dirname, 'data');
 
+// Ensure directories exist
 if (!existsSync(publicDir)) {
   mkdirSync(publicDir, { recursive: true });
 }
@@ -26,22 +27,29 @@ if (!existsSync(dataDir)) {
 const ipFilePath = resolve(publicDir, 'ipv4.txt');
 const dataFilePath = resolve(dataDir, 'starlink-data.json');
 
-// Initialize data file if it doesn't exist
+// Initialize data file with proper error handling
 const initializeDataFile = () => {
-  if (!existsSync(dataFilePath)) {
-    const initialData = {
-      ipAddresses: [],
-      lastUpdated: null,
-      changelog: []
-    };
-    writeFileSync(dataFilePath, JSON.stringify(initialData, null, 2));
+  try {
+    if (!existsSync(dataFilePath)) {
+      const initialData = {
+        ipAddresses: [],
+        lastUpdated: null,
+        changelog: []
+      };
+      writeFileSync(dataFilePath, JSON.stringify(initialData, null, 2));
+      console.log('Initialized data file');
+    }
+  } catch (error) {
+    console.error('Error initializing data file:', error);
   }
 };
 
-// Read data from file
+// Read data from file with proper error handling
 const readData = () => {
   try {
-    initializeDataFile();
+    if (!existsSync(dataFilePath)) {
+      initializeDataFile();
+    }
     const data = readFileSync(dataFilePath, 'utf-8');
     return JSON.parse(data);
   } catch (error) {
@@ -50,7 +58,7 @@ const readData = () => {
   }
 };
 
-// Write data to file
+// Write data to file with proper error handling
 const writeData = (data) => {
   try {
     writeFileSync(dataFilePath, JSON.stringify(data, null, 2));
@@ -61,86 +69,41 @@ const writeData = (data) => {
   }
 };
 
-// CORS proxies for fetching data
-const corsProxies = [
-  'https://corsproxy.io/?',
-  'https://api.allorigins.win/raw?url=',
-  'https://cors-proxy.htmldriven.com/?url='
-];
-
-// Fetch Starlink data
+// Simplified fetch function with better error handling
 const fetchStarlinkData = async () => {
   const STARLINK_URL = 'https://geoip.starlinkisp.net/feed.csv';
   
-  console.log('Fetching Starlink data...');
+  console.log('Attempting to fetch Starlink data...');
   
-  // Try direct fetch first
   try {
     const response = await fetch(STARLINK_URL, {
       headers: {
         'Accept': 'text/csv,text/plain,*/*',
         'User-Agent': 'Mozilla/5.0 (compatible; StarlinkIPExtractor/1.0)'
-      }
+      },
+      timeout: 10000 // 10 second timeout
     });
     
     if (response.ok) {
       const csvText = await response.text();
-      console.log('Direct fetch successful');
+      console.log('Successfully fetched Starlink data');
       return csvText;
+    } else {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
   } catch (error) {
-    console.log('Direct fetch failed:', error.message);
+    console.error('Failed to fetch Starlink data:', error.message);
+    throw new Error(`Failed to fetch Starlink data: ${error.message}`);
   }
-  
-  // Try CORS proxies
-  for (const proxy of corsProxies) {
-    try {
-      let proxyUrl;
-      
-      if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-        proxyUrl = `${proxy}${encodeURIComponent(STARLINK_URL)}&key=&mime=text/plain`;
-      } else {
-        proxyUrl = `${proxy}${encodeURIComponent(STARLINK_URL)}`;
-      }
-      
-      const response = await fetch(proxyUrl, {
-        headers: {
-          'Accept': 'text/csv,text/plain,*/*',
-          'User-Agent': 'Mozilla/5.0 (compatible; StarlinkIPExtractor/1.0)'
-        }
-      });
-      
-      if (response.ok) {
-        let csvText;
-        
-        if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-          const jsonData = await response.json();
-          csvText = jsonData.contents;
-        } else {
-          csvText = await response.text();
-        }
-        
-        if (csvText && csvText.length > 0) {
-          console.log(`Proxy fetch successful using: ${proxy}`);
-          return csvText;
-        }
-      }
-    } catch (error) {
-      console.log(`Proxy ${proxy} failed:`, error.message);
-    }
-  }
-  
-  throw new Error('All fetch methods failed');
 };
 
 // Process CSV data to extract IPv4 addresses
 const processCSVData = (csvText) => {
   const lines = csvText.split('\n');
-  const ipAddresses = new Set(); // Use Set to avoid duplicates
+  const ipAddresses = new Set();
   
   for (const line of lines) {
     if (line.trim()) {
-      // Match IPv4 CIDR notation
       const matches = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2})/g);
       if (matches) {
         matches.forEach(ip => ipAddresses.add(ip));
@@ -151,10 +114,9 @@ const processCSVData = (csvText) => {
   return Array.from(ipAddresses).sort();
 };
 
-// Update IP addresses and create changelog entry
+// Update IP addresses
 const updateIPAddresses = async () => {
   try {
-    // Fetch and process data
     const csvText = await fetchStarlinkData();
     const newIpAddresses = processCSVData(csvText);
     
@@ -162,11 +124,9 @@ const updateIPAddresses = async () => {
       throw new Error('No IPv4 addresses found in data');
     }
     
-    // Read current data
     const currentData = readData();
     const oldIpAddresses = currentData.ipAddresses || [];
     
-    // Create changelog entry if there are changes
     const oldSet = new Set(oldIpAddresses);
     const newSet = new Set(newIpAddresses);
     
@@ -175,14 +135,12 @@ const updateIPAddresses = async () => {
     
     const updateTime = new Date().toISOString();
     
-    // Update data
     const updatedData = {
       ipAddresses: newIpAddresses,
       lastUpdated: updateTime,
       changelog: currentData.changelog || []
     };
     
-    // Add changelog entry if there are changes
     if (added.length > 0 || removed.length > 0) {
       const changelogEntry = {
         date: updateTime,
@@ -191,10 +149,9 @@ const updateIPAddresses = async () => {
         removed
       };
       
-      updatedData.changelog = [changelogEntry, ...updatedData.changelog].slice(0, 10); // Keep last 10 entries
+      updatedData.changelog = [changelogEntry, ...updatedData.changelog].slice(0, 10);
     }
     
-    // Save data
     if (!writeData(updatedData)) {
       throw new Error('Failed to save data');
     }
@@ -220,13 +177,27 @@ const updateIPAddresses = async () => {
 // Middleware
 app.use(express.json());
 
-// API Routes
+// Add CORS headers for API routes
+app.use('/api', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
+
+// API Routes - MUST come before static file serving
 app.get('/api/data', (req, res) => {
   try {
     const data = readData();
     res.json(data);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to read data' });
+    console.error('API /data error:', error);
+    res.status(500).json({ error: 'Failed to read data', details: error.message });
   }
 });
 
@@ -235,6 +206,7 @@ app.post('/api/fetch-data', async (req, res) => {
     const result = await updateIPAddresses();
     res.json(result);
   } catch (error) {
+    console.error('API /fetch-data error:', error);
     res.status(500).json({ 
       success: false,
       error: error.message 
@@ -242,24 +214,45 @@ app.post('/api/fetch-data', async (req, res) => {
   }
 });
 
-// Serve static files
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Serve static files from public directory
 app.use(express.static(publicDir));
 
-// Handle React Router
+// Handle React Router - this MUST come last
 app.get('*', (req, res) => {
+  // Don't serve index.html for API routes
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API endpoint not found' });
+  }
+  
   const indexPath = resolve(publicDir, 'index.html');
   if (existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send('Not found');
+    res.status(404).send('Application not built. Run npm run build first.');
   }
 });
 
-// Initialize
+// Initialize data file on startup
 initializeDataFile();
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('Starlink IP Extractor ready');
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log('API endpoints available:');
+  console.log(`  GET  http://localhost:${PORT}/api/data`);
+  console.log(`  POST http://localhost:${PORT}/api/fetch-data`);
+  console.log(`  GET  http://localhost:${PORT}/api/health`);
+  
+  // Test data file access
+  try {
+    const testData = readData();
+    console.log(`Data file ready with ${testData.ipAddresses?.length || 0} IP addresses`);
+  } catch (error) {
+    console.error('Warning: Data file issue:', error.message);
+  }
 });
