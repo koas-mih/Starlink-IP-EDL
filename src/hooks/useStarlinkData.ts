@@ -240,47 +240,64 @@ export const useStarlinkData = () => {
       setIsLoading(true);
       setError('');
       
-      // Delegate data fetching to the server
-      console.log('Triggering server-side data fetch...');
-      const response = await fetch('/api/update-ip-file', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-          forceUpdate: true
-        })
-      });
+      const csvText = await tryNextProxy(STARLINK_CSV_URL);
+      let newIpAddresses: string[] = [];
       
-      if (response.ok) {
-        // Wait for server to process and write the updated files
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Load the newly updated data from server
-        await loadLatestDataFromServer(true);
-        
-        // Update last updated time
-        const timeResponse = await fetch('/api/last-updated');
-        if (timeResponse.ok) {
-          const timeData = await timeResponse.json();
-          if (timeData.lastUpdated) {
-            setLastUpdated(timeData.lastUpdated);
-            localStorage.setItem('lastUpdated', timeData.lastUpdated);
-          }
+      if (csvText) {
+        try {
+          newIpAddresses = processCSVData(csvText);
+        } catch (csvError) {
+          console.error('Error processing CSV data:', csvError);
         }
+      }
+      
+      if (newIpAddresses.length === 0) {
+        const storedIps = localStorage.getItem('ipAddresses');
+        if (storedIps) {
+          newIpAddresses = JSON.parse(storedIps);
+          console.log('Using cached IP addresses from localStorage');
+        }
+      }
+      
+      if (newIpAddresses.length > 0) {
+        const response = await fetch('/api/update-ip-file', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ 
+            forceUpdate: true,
+            ipAddresses: newIpAddresses
+          })
+        });
         
-        // Fetch updated changelog
-        fetchChangelog();
+        if (response.ok) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          await loadLatestDataFromServer(true);
+          
+          const timeResponse = await fetch('/api/last-updated');
+          if (timeResponse.ok) {
+            const timeData = await timeResponse.json();
+            if (timeData.lastUpdated) {
+              setLastUpdated(timeData.lastUpdated);
+              localStorage.setItem('lastUpdated', timeData.lastUpdated);
+            }
+          }
+          
+          fetchChangelog();
+        } else {
+          const errorData = await response.json();
+          throw new Error(`Failed to trigger server update: ${errorData.error || 'Unknown error'}`);
+        }
       } else {
-        const errorData = await response.json();
-        throw new Error(`Failed to trigger server update: ${errorData.error || 'Unknown error'}`);
+        throw new Error('No IP addresses available - both fetch and cache failed');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
       setError(errorMessage);
       console.error('Fetch error:', errorMessage);
       
-      // Fall back to cached data if available
       const storedIps = localStorage.getItem('ipAddresses');
       if (storedIps && ipAddresses.length === 0) {
         setIpAddresses(JSON.parse(storedIps));

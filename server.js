@@ -4,7 +4,6 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import { promisify } from 'util';
-import updateIpHandler from './api/update-ip.js';
 
 // Get current directory
 const __filename = fileURLToPath(import.meta.url);
@@ -567,9 +566,6 @@ app.get('/api/updates', (req, res) => {
   });
 });
 
-// Add the missing update-ip-file route
-app.post('/api/update-ip-file', updateIpHandler);
-
 // Serve IP addresses as plain text
 app.get('/ipv4', (req, res) => {
   try {
@@ -602,10 +598,8 @@ app.get('*', (req, res) => {
 });
 
 // Start server
-// Start HTTP server
 app.listen(PORT, () => {
-  console.log(`HTTP Server running on port ${PORT}`);
-  console.log(`Access the application at: http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
   console.log(`Background updates scheduled every ${currentUpdateInterval} minutes`);
   console.log(`Next update: ${new Date(nextUpdateTime).toISOString()}`);
 });
