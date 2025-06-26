@@ -128,12 +128,12 @@ const ipAddressFilePlugin = () => {
                 res.end(JSON.stringify({ success: false, error: 'Failed to update IP file' }));
               }
             });
-            return;
           } catch (error) {
             console.error('Error processing update request:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ success: false, error: 'Server error' }));
           }
+          return;
         }
         
         // Handle /api/last-updated endpoint
@@ -145,13 +145,12 @@ const ipAddressFilePlugin = () => {
             res.setHeader('Content-Type', 'application/json');
             res.statusCode = 200;
             res.end(JSON.stringify({ lastUpdated: data.lastUpdated }));
-            return;
           } catch (error) {
             console.error('Error reading last updated time:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'Failed to get last update time' }));
-            return;
           }
+          return;
         }
         
         // Handle /ipv4 requests directly to serve the static file
@@ -166,15 +165,14 @@ const ipAddressFilePlugin = () => {
             res.setHeader('Content-Disposition', 'inline; filename="ipv4.txt"');
             res.statusCode = 200;
             res.end(content);
-            return;
           } catch (error) {
             console.error('Error serving /ipv4.txt file:', error);
             // Still serve as text/plain but with error message
             res.setHeader('Content-Type', 'text/plain');
             res.statusCode = 500;
             res.end('Error retrieving IP addresses. Please try again later.');
-            return;
           }
+          return;
         }
         
         // Handle /api/changelog endpoint
@@ -186,13 +184,12 @@ const ipAddressFilePlugin = () => {
             res.setHeader('Content-Type', 'application/json');
             res.statusCode = 200;
             res.end(JSON.stringify({ changelog: data.changelog || [] }));
-            return;
           } catch (error) {
             console.error('Error reading changelog:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'Failed to get changelog' }));
-            return;
           }
+          return;
         }
         
         // Handle /api/update-changelog endpoint
@@ -233,12 +230,12 @@ const ipAddressFilePlugin = () => {
                 res.end(JSON.stringify({ error: 'Failed to update changelog' }));
               }
             });
-            return;
           } catch (error) {
             console.error('Error processing changelog update:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'Server error' }));
           }
+          return;
         }
         
         // Handle SSE connections
@@ -316,12 +313,12 @@ const ipAddressFilePlugin = () => {
                 res.end(JSON.stringify({ error: 'Failed to update interval' }));
               }
             });
-            return;
           } catch (error) {
             console.error('Error processing interval update:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'Server error' }));
           }
+          return;
         }
         
         // Handle /api/settings endpoint
@@ -336,13 +333,12 @@ const ipAddressFilePlugin = () => {
               updateInterval: data.updateInterval,
               autoUpdateEnabled: data.autoUpdateEnabled
             }));
-            return;
           } catch (error) {
             console.error('Error reading settings:', error);
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'Failed to get settings' }));
-            return;
           }
+          return;
         }
         
         next();
