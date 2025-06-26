@@ -265,11 +265,7 @@ const ipAddressFilePlugin = () => {
           return;
         }
         
-        next();
-      });
-      
-      // Handle /api/update-interval endpoint
-      server.middlewares.use(async (req, res, next) => {
+        // Handle /api/update-interval endpoint
         if (req.url === '/api/update-interval' && req.method === 'POST') {
           try {
             let body = '';

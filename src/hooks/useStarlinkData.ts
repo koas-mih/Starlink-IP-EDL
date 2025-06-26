@@ -72,7 +72,12 @@ export const useStarlinkData = () => {
       
       console.log(`Attempting proxy fetch with URL: ${proxyUrl}`);
       
-      const response = await fetchWithTimeout(proxyUrl);
+      const response = await fetchWithTimeout(proxyUrl, 30000, {
+        headers: {
+          'Accept': 'text/plain,text/csv,*/*',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
       
       if (!response.ok) {
         throw new Error(`Proxy ${attempt + 1} failed with: ${response.status}`);
@@ -91,7 +96,7 @@ export const useStarlinkData = () => {
   };
 
   // Improved fetch with timeout function
-  const fetchWithTimeout = async (url: string, timeout = 30000) => {
+  const fetchWithTimeout = async (url: string, timeout = 30000, options: RequestInit = {}) => {
     const controller = new AbortController();
     const signal = controller.signal;
     
@@ -105,7 +110,7 @@ export const useStarlinkData = () => {
     
     try {
       const response = await Promise.race([
-        fetch(url, { signal }),
+        fetch(url, { ...options, signal }),
         timeoutPromise
       ]);
       
