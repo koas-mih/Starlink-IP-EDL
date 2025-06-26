@@ -54,8 +54,7 @@ const PORT = process.env.PORT || 3000;
 const corsProxies = [
   'https://corsproxy.io/?',
   'https://proxy.cors.sh/',
-  'https://api.allorigins.win/raw?url=',
-  'https://cors-proxy.htmldriven.com/?url='
+  'https://api.allorigins.win/raw?url='
 ];
 
 // Connected SSE clients
@@ -180,9 +179,7 @@ async function updateIPAddresses() {
       for (const proxy of corsProxies) {
         try {
           let proxyUrl;
-          if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-            proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}&key=&mime=text/plain`;
-          } else if (proxy === 'https://corsproxy.io/?') {
+          if (proxy === 'https://corsproxy.io/?') {
             proxyUrl = `${proxy}${STARLINK_CSV_URL}`;
           } else {
             proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}`;
@@ -192,12 +189,7 @@ async function updateIPAddresses() {
           
           if (!response.ok) continue;
           
-          if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-            const data = await response.json();
-            csvText = data.contents;
-          } else {
-            csvText = await response.text();
-          }
+          csvText = await response.text();
           
           if (csvText) {
             console.log('Background task: Successfully fetched data through proxy');

@@ -7,8 +7,7 @@ async function fetchStarlinkAddresses() {
   const corsProxies = [
     'https://corsproxy.io/?',
     'https://proxy.cors.sh/',
-    'https://api.allorigins.win/raw?url=',
-    'https://cors-proxy.htmldriven.com/?url='
+    'https://api.allorigins.win/raw?url='
   ];
   
   // Try direct fetch first
@@ -31,9 +30,7 @@ async function fetchStarlinkAddresses() {
     const proxy = corsProxies[i];
     try {
       let proxyUrl;
-      if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-        proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}&key=&mime=text/plain`;
-      } else if (proxy === 'https://corsproxy.io/?') {
+      if (proxy === 'https://corsproxy.io/?') {
         proxyUrl = `${proxy}${STARLINK_CSV_URL}`;
       } else {
         proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}`;
@@ -43,11 +40,6 @@ async function fetchStarlinkAddresses() {
       
       if (!response.ok) {
         continue;
-      }
-      
-      if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-        const data = await response.json();
-        return data.contents;
       }
       
       return await response.text();
