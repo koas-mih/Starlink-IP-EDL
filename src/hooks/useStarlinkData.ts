@@ -13,7 +13,6 @@ export const useStarlinkData = () => {
   const [error, setError] = useState('');
   const [fetchSuccess, setFetchSuccess] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [csvData, setCsvData] = useState<string | null>(null);
   const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
   const [showChangelog, setShowChangelog] = useState(false);
   
@@ -48,7 +47,7 @@ export const useStarlinkData = () => {
     }, 3000);
   };
 
-  // Function to load the latest data from the server without triggering a full fetch
+  // Function to load the latest data from the server
   const loadLatestDataFromServer = async (showSuccess = true) => {
     try {
       const response = await fetch('/ipv4.txt', {
@@ -61,22 +60,14 @@ export const useStarlinkData = () => {
       if (response.ok) {
         const text = await response.text();
         if (text && text.trim()) {
-          const serverIps = text.trim().split('\n');
+          const serverIps = text.trim().split('\n').filter(ip => ip.trim());
           if (serverIps.length > 0) {
-            const currentIpsJSON = JSON.stringify(ipAddresses);
-            const newIpsJSON = JSON.stringify(serverIps);
-            const hasChanged = currentIpsJSON !== newIpsJSON;
+            setIpAddresses(serverIps);
+            localStorage.setItem('ipAddresses', JSON.stringify(serverIps));
+            console.log(`Successfully loaded ${serverIps.length} IPs from server`);
             
-            if (hasChanged) {
-              setIpAddresses(serverIps);
-              localStorage.setItem('ipAddresses', JSON.stringify(serverIps));
-              console.log(`Successfully loaded ${serverIps.length} IPs from server`);
-              
-              if (showSuccess) {
-                showSuccessMessage();
-              }
-            } else {
-              console.log('IP data unchanged, not updating state');
+            if (showSuccess) {
+              showSuccessMessage();
             }
           }
         }
@@ -86,7 +77,7 @@ export const useStarlinkData = () => {
     }
   };
 
-  // Define fetchData - now uses server-side fetching
+  // Define fetchData - triggers server-side update
   const fetchData = useCallback(async () => {
     if (isFetchingRef.current) {
       console.log('Fetch already in progress, skipping...');
@@ -131,7 +122,7 @@ export const useStarlinkData = () => {
       }
       
       // Refresh changelog
-      fetchChangelog();
+      await fetchChangelog();
       
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
@@ -140,9 +131,16 @@ export const useStarlinkData = () => {
       
       // Try to load cached data if available
       const storedIps = localStorage.getItem('ipAddresses');
-      if (storedIps && ipAddresses.length === 0) {
-        setIpAddresses(JSON.parse(storedIps));
-        console.log('Recovered using cached IP addresses from localStorage');
+      if (storedIps) {
+        try {
+          const parsedIps = JSON.parse(storedIps);
+          if (Array.isArray(parsedIps) && parsedIps.length > 0) {
+            setIpAddresses(parsedIps);
+            console.log('Recovered using cached IP addresses from localStorage');
+          }
+        } catch (parseError) {
+          console.error('Error parsing cached IP addresses:', parseError);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -150,31 +148,50 @@ export const useStarlinkData = () => {
         isFetchingRef.current = false;
       }, 1000);
     }
-  }, [ipAddresses]);
-
+  }, []);
 
   // Initial data load effect
   useEffect(() => {
-    const checkForUpdates = () => {
-      Promise.all([
-        fetchChangelog(),
-        fetch('/api/last-updated')
-          .then(response => response.json())
-          .then(data => {
-            if (data.lastUpdated) {
-              setLastUpdated(data.lastUpdated);
-              localStorage.setItem('lastUpdated', data.lastUpdated);
+    const initializeData = async () => {
+      try {
+        // Load cached data first
+        const storedIps = localStorage.getItem('ipAddresses');
+        const storedTime = localStorage.getItem('lastUpdated');
+        
+        if (storedIps) {
+          try {
+            const parsedIps = JSON.parse(storedIps);
+            if (Array.isArray(parsedIps) && parsedIps.length > 0) {
+              setIpAddresses(parsedIps);
             }
-          })
-          .catch(error => {
-            console.error('Error fetching last updated time:', error);
-            const storedTime = localStorage.getItem('lastUpdated');
-            if (storedTime) {
-              setLastUpdated(storedTime);
-            }
-          }),
-        loadLatestDataFromServer(false)
-      ]).catch(console.error);
+          } catch (parseError) {
+            console.error('Error parsing cached IP addresses:', parseError);
+          }
+        }
+        
+        if (storedTime) {
+          setLastUpdated(storedTime);
+        }
+        
+        // Fetch fresh data from server
+        await Promise.all([
+          fetchChangelog(),
+          fetch('/api/last-updated')
+            .then(response => response.json())
+            .then(data => {
+              if (data.lastUpdated) {
+                setLastUpdated(data.lastUpdated);
+                localStorage.setItem('lastUpdated', data.lastUpdated);
+              }
+            })
+            .catch(error => {
+              console.error('Error fetching last updated time:', error);
+            }),
+          loadLatestDataFromServer(false)
+        ]);
+      } catch (error) {
+        console.error('Error initializing data:', error);
+      }
     };
     
     const handleFetchEvent = () => {
@@ -182,22 +199,34 @@ export const useStarlinkData = () => {
         fetchData();
       }
     };
-    window.addEventListener('fetch-starlink-data', handleFetchEvent);
     
-    checkForUpdates();
+    window.addEventListener('fetch-starlink-data', handleFetchEvent);
+    initializeData();
     
     return () => {
       window.removeEventListener('fetch-starlink-data', handleFetchEvent);
+      if (successTimeoutRef.current !== null) {
+        window.clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = null;
+      }
     };
   }, [fetchData]);
-
 
   // Listen for storage events from other tabs/windows
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'lastUpdated' && e.newValue) {
         setLastUpdated(e.newValue);
-        localStorage.setItem('lastUpdated', e.newValue);
+      }
+      if (e.key === 'ipAddresses' && e.newValue) {
+        try {
+          const parsedIps = JSON.parse(e.newValue);
+          if (Array.isArray(parsedIps)) {
+            setIpAddresses(parsedIps);
+          }
+        } catch (parseError) {
+          console.error('Error parsing IP addresses from storage event:', parseError);
+        }
       }
     };
     
@@ -219,7 +248,6 @@ export const useStarlinkData = () => {
     error,
     lastUpdated,
     fetchSuccess,
-    csvData,
     changelog,
     showChangelog,
     fetchData,
