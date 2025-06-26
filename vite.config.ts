@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import fs from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 import { existsSync } from 'fs';
 
@@ -22,13 +22,13 @@ const ipAddressFilePlugin = () => {
       // Ensure data directory exists
       const dataDir = path.join(process.cwd(), 'data');
       if (!existsSync(dataDir)) {
-        fs.mkdir(dataDir, { recursive: true });
+        fs.mkdirSync(dataDir, { recursive: true });
       }
 
       // Ensure ipData.json exists
       const ipDataPath = path.join(dataDir, 'ipData.json');
       if (!existsSync(ipDataPath)) {
-        fs.writeFile(ipDataPath, JSON.stringify({
+        fs.writeFileSync(ipDataPath, JSON.stringify({
           lastUpdated: null,
           ipAddresses: [],
           updateInterval: 60,
@@ -75,24 +75,24 @@ const ipAddressFilePlugin = () => {
                   // Ensure public directory exists
                   const publicDir = path.join(process.cwd(), 'public');
                   try {
-                    await fs.mkdir(publicDir, { recursive: true });
+                    await fs.promises.mkdir(publicDir, { recursive: true });
                   } catch (err) {
                     // Directory might already exist, which is fine
                   }
                   
                   // Write to public/ipv4.txt file (renamed with .txt extension)
-                  await fs.writeFile(
+                  await fs.promises.writeFile(
                     path.join(process.cwd(), 'public', 'ipv4.txt'), 
                     content, 
                     'utf-8'
                   );
                   
                   // Update ipData.json
-                  await fs.writeFile(
+                  await fs.promises.writeFile(
                     path.join(process.cwd(), 'data', 'ipData.json'),
                     JSON.stringify(
                       {
-                        ...JSON.parse(await fs.readFile(ipDataPath, 'utf-8')),
+                        ...JSON.parse(await fs.promises.readFile(ipDataPath, 'utf-8')),
                         lastUpdated: new Date().toISOString(),
                         ipAddresses: ips
                       }, 
@@ -140,7 +140,7 @@ const ipAddressFilePlugin = () => {
         if (req.url === '/api/last-updated' && req.method === 'GET') {
           try {
             const ipDataPath = path.join(process.cwd(), 'data', 'ipData.json');
-            const data = JSON.parse(await fs.readFile(ipDataPath, 'utf-8'));
+            const data = JSON.parse(await fs.promises.readFile(ipDataPath, 'utf-8'));
             
             res.setHeader('Content-Type', 'application/json');
             res.statusCode = 200;
@@ -158,7 +158,7 @@ const ipAddressFilePlugin = () => {
         if (req.url === '/ipv4' && req.method === 'GET') {
           try {
             const ipDataPath = path.join(process.cwd(), 'data', 'ipData.json');
-            const data = JSON.parse(await fs.readFile(ipDataPath, 'utf-8'));
+            const data = JSON.parse(await fs.promises.readFile(ipDataPath, 'utf-8'));
             
             const content = data.ipAddresses.join('\n');
             
@@ -181,7 +181,7 @@ const ipAddressFilePlugin = () => {
         if (req.url === '/api/changelog' && req.method === 'GET') {
           try {
             const ipDataPath = path.join(process.cwd(), 'data', 'ipData.json');
-            const data = JSON.parse(await fs.readFile(ipDataPath, 'utf-8'));
+            const data = JSON.parse(await fs.promises.readFile(ipDataPath, 'utf-8'));
             
             res.setHeader('Content-Type', 'application/json');
             res.statusCode = 200;
@@ -214,7 +214,7 @@ const ipAddressFilePlugin = () => {
                 
                 // Read current data
                 const ipDataPath = path.join(process.cwd(), 'data', 'ipData.json');
-                const data = JSON.parse(await fs.readFile(ipDataPath, 'utf-8'));
+                const data = JSON.parse(await fs.promises.readFile(ipDataPath, 'utf-8'));
                 
                 // Add new entry to the start of changelog
                 const newChangelog = [entry, ...(data.changelog || [])];
@@ -223,7 +223,7 @@ const ipAddressFilePlugin = () => {
                 data.changelog = newChangelog.slice(0, 10);
                 
                 // Write back to file
-                await fs.writeFile(ipDataPath, JSON.stringify(data, null, 2));
+                await fs.promises.writeFile(ipDataPath, JSON.stringify(data, null, 2));
                 
                 res.statusCode = 200;
                 res.end(JSON.stringify({ success: true }));
@@ -287,7 +287,7 @@ const ipAddressFilePlugin = () => {
                 
                 // Read current data
                 const ipDataPath = path.join(process.cwd(), 'data', 'ipData.json');
-                const currentData = JSON.parse(await fs.readFile(ipDataPath, 'utf-8'));
+                const currentData = JSON.parse(await fs.promises.readFile(ipDataPath, 'utf-8'));
                 
                 // Update settings
                 if (typeof interval === 'number' && interval >= 1) {
@@ -306,7 +306,7 @@ const ipAddressFilePlugin = () => {
                 });
                 
                 // Write back to file
-                await fs.writeFile(ipDataPath, JSON.stringify(currentData, null, 2));
+                await fs.promises.writeFile(ipDataPath, JSON.stringify(currentData, null, 2));
                 
                 res.statusCode = 200;
                 res.end(JSON.stringify({ success: true }));
@@ -328,7 +328,7 @@ const ipAddressFilePlugin = () => {
         if (req.url === '/api/settings' && req.method === 'GET') {
           try {
             const ipDataPath = path.join(process.cwd(), 'data', 'ipData.json');
-            const data = JSON.parse(await fs.readFile(ipDataPath, 'utf-8'));
+            const data = JSON.parse(await fs.promises.readFile(ipDataPath, 'utf-8'));
             
             res.setHeader('Content-Type', 'application/json');
             res.statusCode = 200;
