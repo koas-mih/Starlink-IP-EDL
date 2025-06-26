@@ -17,14 +17,9 @@ function App() {
     fetchSuccess,
     error,
     lastUpdated,
-    autoUpdateEnabled,
-    updateInterval,
-    updateIntervalSettings,
     changelog,
     showChangelog,
-    nextUpdateTime,
     fetchData,
-    toggleAutoUpdate,
     toggleChangelog
   } = useStarlinkData();
 
@@ -72,11 +67,9 @@ function App() {
         error={error}
         fetchSuccess={fetchSuccess}
         lastUpdated={lastUpdated}
-        updateInterval={updateInterval}
         copiedToClipboard={copiedToClipboard}
         showTutorial={showTutorial}
         changelog={changelog}
-        nextUpdateTime={nextUpdateTime}
         onRefresh={fetchData}
         onCopy={handleCopyToClipboard}
         onViewCSV={() => setIsCSVView(true)}

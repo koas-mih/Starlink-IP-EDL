@@ -14,18 +14,11 @@ export const useStarlinkData = () => {
   const [fetchSuccess, setFetchSuccess] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [csvData, setCsvData] = useState<string | null>(null);
-  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(true);
-  const [updateInterval, setUpdateInterval] = useState(60);
   const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
   const [showChangelog, setShowChangelog] = useState(false);
-  const [sseConnected, setSseConnected] = useState(false);
-  const [nextUpdateTime, setNextUpdateTime] = useState<number>(0); // Will be set by server
   
-  const eventSourceRef = useRef<EventSource | null>(null);
   const isFetchingRef = useRef(false);
   const successTimeoutRef = useRef<number | null>(null);
-  const lastUpdateTimeRef = useRef<number>(0);
-  const MIN_UPDATE_INTERVAL = 5000;
 
   // Function to fetch changelog from server
   const fetchChangelog = async () => {
@@ -159,30 +152,6 @@ export const useStarlinkData = () => {
     }
   }, [ipAddresses]);
 
-  // Function to update interval settings - sends to server
-  const updateIntervalSettings = useCallback(async (minutes: number) => {
-    if (minutes >= 1) {
-      try {
-        const response = await fetch('/api/update-interval', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ interval: minutes })
-        });
-        
-        if (response.ok) {
-          setUpdateInterval(minutes);
-          console.log(`Interval updated to ${minutes} minutes`);
-        } else {
-          const error = await response.json();
-          console.error('Error updating interval:', error);
-        }
-      } catch (error) {
-        console.error('Failed to update interval:', error);
-      }
-    }
-  }, []);
 
   // Initial data load effect
   useEffect(() => {
@@ -222,94 +191,8 @@ export const useStarlinkData = () => {
     };
   }, [fetchData]);
 
-  // Set up SSE connection for real-time updates
-  useEffect(() => {
-    try {
-      const eventSource = new EventSource('/api/updates');
-      eventSourceRef.current = eventSource;
-      
-      eventSource.onopen = () => {
-        setSseConnected(true);
-        console.log('SSE connection established');
-      };
-      
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          if (data.type === 'update') {
-            const now = Date.now();
-            const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
-            
-            if (timeSinceLastUpdate >= MIN_UPDATE_INTERVAL) {
-              lastUpdateTimeRef.current = now;
-              if (data.lastUpdated) {
-                setLastUpdated(data.lastUpdated);
-              }
-              if (data.nextUpdateTime) {
-                setNextUpdateTime(data.nextUpdateTime);
-              }
-              loadLatestDataFromServer(false);
-            } else {
-              console.log(`Ignoring update, last update was ${timeSinceLastUpdate}ms ago`);
-            }
-          }
-          
-          if (data.type === 'settingsChange') {
-            if (data.updateInterval !== undefined) {
-              setUpdateInterval(data.updateInterval);
-            }
-            
-            if (data.autoUpdateEnabled !== undefined && data.autoUpdateEnabled !== autoUpdateEnabled) {
-              setAutoUpdateEnabled(data.autoUpdateEnabled);
-            }
-            
-            if (data.nextUpdateTime !== undefined) {
-              setNextUpdateTime(data.nextUpdateTime);
-            }
-          }
-          
-          if (data.type === 'connected' && data.currentSettings) {
-            if (data.currentSettings.updateInterval !== undefined) {
-              setUpdateInterval(data.currentSettings.updateInterval);
-            }
-            if (data.currentSettings.nextUpdateTime !== undefined) {
-              setNextUpdateTime(data.currentSettings.nextUpdateTime);
-            }
-          }
-        } catch (error) {
-          console.error('Error parsing SSE message:', error);
-        }
-      };
-      
-      eventSource.onerror = () => {
-        console.log('SSE connection error - will reconnect automatically');
-        setSseConnected(false);
-        
-        setTimeout(() => {
-          if (eventSourceRef.current) {
-            eventSourceRef.current.close();
-            eventSourceRef.current = new EventSource('/api/updates');
-          }
-        }, 5000);
-      };
-    } catch (err) {
-      console.error('Error setting up SSE connection:', err);
-      setSseConnected(false);
-    }
-    
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      if (successTimeoutRef.current !== null) {
-        window.clearTimeout(successTimeoutRef.current);
-        successTimeoutRef.current = null;
-      }
-    };
-  }, [autoUpdateEnabled]);
 
-  // Listen for storage events from other tabs/windows and fetch server settings
+  // Listen for storage events from other tabs/windows
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'lastUpdated' && e.newValue) {
@@ -318,57 +201,12 @@ export const useStarlinkData = () => {
       }
     };
     
-    const handleSettingsChange = (e: CustomEvent) => {
-      const { updateInterval: newInterval, autoUpdateEnabled: newAutoUpdate } = e.detail;
-      if (newInterval !== undefined) {
-        setUpdateInterval(newInterval);
-      }
-      if (newAutoUpdate !== undefined) {
-        setAutoUpdateEnabled(newAutoUpdate);
-      }
-    };
-    
     window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('settings-changed', handleSettingsChange as EventListener);
-    
-    // Fetch server settings including nextUpdateTime
-    fetch('/api/settings')
-      .then(res => res.json())
-      .then(settings => {
-        if (settings.updateInterval) {
-          setUpdateInterval(settings.updateInterval);
-        }
-        if (typeof settings.autoUpdateEnabled === 'boolean') {
-          setAutoUpdateEnabled(settings.autoUpdateEnabled);
-        }
-        if (settings.nextUpdateTime) {
-          setNextUpdateTime(settings.nextUpdateTime);
-          console.log(`Client synchronized with server nextUpdateTime: ${new Date(settings.nextUpdateTime).toISOString()}`);
-        }
-      })
-      .catch(console.error);
     
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('settings-changed', handleSettingsChange as EventListener);
     };
   }, []);
-
-  // Toggle auto-update function
-  const toggleAutoUpdate = () => {
-    const newState = !autoUpdateEnabled;
-    setAutoUpdateEnabled(newState);
-    
-    fetch('/api/update-interval', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ autoUpdateEnabled: newState })
-    }).catch(err => {
-      console.error('Error updating auto-update setting:', err);
-    });
-  };
 
   // Toggle changelog view
   const toggleChangelog = () => {
@@ -382,14 +220,9 @@ export const useStarlinkData = () => {
     lastUpdated,
     fetchSuccess,
     csvData,
-    autoUpdateEnabled,
     changelog,
-    nextUpdateTime, // This is now server-authoritative
     showChangelog,
     fetchData,
-    updateInterval,
-    updateIntervalSettings,
-    toggleAutoUpdate,
     toggleChangelog
   };
 };

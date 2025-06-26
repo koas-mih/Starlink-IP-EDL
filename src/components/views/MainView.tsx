@@ -15,11 +15,9 @@ interface MainViewProps {
   error: string;
   lastUpdated: string | null;
   copiedToClipboard: boolean;
-  updateInterval: number;
   showTutorial: boolean;
   changelog: ChangelogEntry[];
   onRefresh: () => void;
-  nextUpdateTime: number;
   onCopy: () => void;
   onViewCSV: () => void;
   onDownload: () => void;
@@ -34,11 +32,9 @@ export const MainView: React.FC<MainViewProps> = ({
   error,
   lastUpdated,
   copiedToClipboard,
-  updateInterval,
   showTutorial,
   changelog,
   onRefresh,
-  nextUpdateTime,
   onCopy,
   onViewCSV,
   onDownload,
@@ -70,42 +66,6 @@ export const MainView: React.FC<MainViewProps> = ({
     onRefresh();
   }, [isLoading, onRefresh]);
 
-  // State for countdown timer
-  const [timeUntilUpdate, setTimeUntilUpdate] = useState<string>('');
-
-  // Update countdown timer every second
-  useEffect(() => {
-    const updateCountdown = () => {
-      const now = Date.now();
-      const timeLeft = Math.max(0, nextUpdateTime - now);
-      
-      if (timeLeft === 0) {
-        if (isLoading) { 
-          setTimeUntilUpdate('Updating...');
-        } else {
-          // Trigger fetch and reset timer
-          onRefresh();
-        }
-        return;
-      }
-      
-      const minutes = Math.floor(timeLeft / 60000);
-      const seconds = Math.floor((timeLeft % 60000) / 1000);
-      
-      // Format with leading zeros for better readability
-      const formattedMinutes = String(minutes).padStart(2, '0');
-      const formattedSeconds = String(seconds).padStart(2, '0');
-      setTimeUntilUpdate(`${formattedMinutes}m ${formattedSeconds}s`);
-    };
-    
-    // Initial update
-    updateCountdown();
-    
-    // Update every second
-    const interval = setInterval(updateCountdown, 1000);
-    
-    return () => clearInterval(interval);
-  }, [nextUpdateTime, isLoading, onRefresh, updateInterval]);
 
   return (
     <div className="min-h-screen bg-black bg-opacity-95 text-white">
@@ -291,15 +251,6 @@ export const MainView: React.FC<MainViewProps> = ({
                 <div>
                   <span className="font-medium">Last updated:</span>
                   <span className="ml-1">{formatDate(lastUpdated)}</span>
-                </div>
-                <div className="mt-1 sm:mt-0 sm:ml-3 flex items-center space-x-3">
-                  <span className="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">
-                    Updates every {updateInterval === 1 ? 'minute' : `${updateInterval} minutes`}
-                  </span>
-                  <span className="text-xs bg-purple-900 text-purple-300 px-2 py-0.5 rounded-full flex items-center">
-                    <Clock className="w-3 h-3 mr-1" />
-                    Next update in: {timeUntilUpdate}
-                  </span>
                 </div>
               </div>
             </motion.div>
@@ -496,16 +447,7 @@ export const MainView: React.FC<MainViewProps> = ({
           transition={{ delay: 0.8 }}
           className="mt-8 text-center text-sm text-gray-500"
         >
-          <div className="space-y-2">
-            <p>© 2025 Starlink IPv4 CIDR Extractor | Designed for network administrators</p>
-            <Link
-              to="/settings"
-              className="text-blue-400 hover:text-blue-300 transition-colors inline-flex items-center"
-            >
-              <Settings className="h-4 w-4 mr-1" />
-              Settings
-            </Link>
-          </div>
+          <p>© 2025 Starlink IPv4 CIDR Extractor | Designed for network administrators</p>
         </motion.div>
       </div>
     </div>

@@ -5,20 +5,10 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import { promisify } from 'util';
 
-// Get current directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Promisify writeFile for better async handling
 const writeFileAsync = promisify(writeFileSync);
-
-// Default update interval (15 minutes)
-const DEFAULT_UPDATE_INTERVAL = 15;
-let currentUpdateInterval = DEFAULT_UPDATE_INTERVAL;
-let updateTimer = null;
-let nextUpdateTime = 0; // Server-side authoritative next update time
-let lastUpdateTime = 0;
-const MIN_UPDATE_INTERVAL = 5000; // 5 seconds minimum between updates
 
 // Initialize directories
 const publicDir = resolve(__dirname, 'public');
@@ -34,16 +24,12 @@ if (!existsSync(dataDir)) {
 const ipFilePath = resolve(publicDir, 'ipv4.txt');
 const ipDataPath = resolve(dataDir, 'ipData.json');
 
-// Ensure ipData.json exists with nextUpdateTime
+// Ensure ipData.json exists
 if (!existsSync(ipDataPath)) {
-  const now = Date.now();
   writeFileSync(ipDataPath, JSON.stringify({
     lastUpdated: new Date().toISOString(),
     ipAddresses: [],
-    updateInterval: DEFAULT_UPDATE_INTERVAL,
-    autoUpdateEnabled: true,
-    changelog: [],
-    nextUpdateTime: now + (DEFAULT_UPDATE_INTERVAL * 60 * 1000) // Initialize with default interval
+    changelog: []
   }, null, 2), 'utf-8');
 }
 
@@ -58,79 +44,20 @@ const corsProxies = [
   'https://cors-proxy.htmldriven.com/?url='
 ];
 
-// Connected SSE clients
-const sseClients = new Set();
-
-// Function to notify all connected clients of updates
-function notifyClients(message) {
-  sseClients.forEach(client => {
-    client.write(`data: ${JSON.stringify(message)}\n\n`);
-  });
-}
-
-// Function to save nextUpdateTime to persistent storage
-function saveNextUpdateTime(nextTime) {
-  try {
-    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    ipData.nextUpdateTime = nextTime;
-    writeFileSync(ipDataPath, JSON.stringify(ipData, null, 2), 'utf-8');
-    nextUpdateTime = nextTime;
-    console.log(`Next update time saved: ${new Date(nextTime).toISOString()}`);
-  } catch (error) {
-    console.error('Error saving next update time:', error);
-  }
-}
-
-// Function to load nextUpdateTime from persistent storage
-function loadNextUpdateTime() {
-  try {
-    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    if (ipData.nextUpdateTime && typeof ipData.nextUpdateTime === 'number') {
-      nextUpdateTime = ipData.nextUpdateTime;
-      console.log(`Loaded next update time: ${new Date(nextUpdateTime).toISOString()}`);
-      return nextUpdateTime;
-    }
-  } catch (error) {
-    console.error('Error loading next update time:', error);
-  }
-  
-  // If no valid nextUpdateTime found, calculate a new one
-  const now = Date.now();
-  const intervalMs = currentUpdateInterval * 60 * 1000;
-  nextUpdateTime = now + intervalMs;
-  saveNextUpdateTime(nextUpdateTime);
-  return nextUpdateTime;
-}
-
 // Function to fetch and update IP addresses
 async function updateIPAddresses() {
-  // Prevent updates too close together
-  const now = Date.now();
-  if (now - lastUpdateTime < MIN_UPDATE_INTERVAL) {
-    console.log('Background task: Skipping update - too soon since last update');
-    return;
-  }
-  
-  console.log('Background task: Starting IP address update...');
+  console.log('Manual update: Starting IP address update...');
   
   try {
     // Read current settings
     const currentData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    
-    // Check if auto-update is enabled
-    if (!currentData.autoUpdateEnabled) {
-      console.log('Background task: Auto-update is disabled, skipping update');
-      // Still schedule next update check
-      scheduleNextUpdate();
-      return;
-    }
     
     const STARLINK_CSV_URL = 'https://geoip.starlinkisp.net/feed.csv';
     
     // Try direct fetch first
     let csvText = '';
     try {
-      console.log('Background task: Attempting direct fetch...');
+      console.log('Manual update: Attempting direct fetch...');
       const response = await fetch(STARLINK_CSV_URL, {
         headers: {
           'Accept': 'text/plain,text/csv,*/*',
@@ -140,15 +67,15 @@ async function updateIPAddresses() {
       
       if (response.ok) {
         csvText = await response.text();
-        console.log('Background task: Direct fetch successful');
+        console.log('Manual update: Direct fetch successful');
       }
     } catch (directError) {
-      console.log('Background task: Direct fetch failed:', directError);
+      console.log('Manual update: Direct fetch failed:', directError);
     }
     
     // If direct fetch failed, try proxies
     if (!csvText) {
-      console.log('Background task: Trying CORS proxies...');
+      console.log('Manual update: Trying CORS proxies...');
       for (const proxy of corsProxies) {
         try {
           let proxyUrl;
@@ -177,18 +104,18 @@ async function updateIPAddresses() {
           }
           
           if (csvText) {
-            console.log('Background task: Successfully fetched data through proxy');
+            console.log('Manual update: Successfully fetched data through proxy');
             break;
           }
         } catch (error) {
-          console.log(`Background task: Proxy failed:`, error);
+          console.log(`Manual update: Proxy failed:`, error);
           continue;
         }
       }
     }
     
     if (!csvText) {
-      throw new Error('Background task: Failed to fetch data from all sources');
+      throw new Error('Manual update: Failed to fetch data from all sources');
     }
     
     // Process CSV data
@@ -206,14 +133,11 @@ async function updateIPAddresses() {
     });
     
     if (ipv4List.length === 0) {
-      throw new Error('Background task: No IPv4 addresses found in data');
+      throw new Error('Manual update: No IPv4 addresses found in data');
     }
     
     // Update files
     const updateTime = new Date().toISOString();
-    
-    // Update last update time
-    lastUpdateTime = now;
     
     // Write to ipv4.txt
     writeFileSync(ipFilePath, ipv4List.join('\n'), 'utf-8');
@@ -244,102 +168,19 @@ async function updateIPAddresses() {
     currentData.lastUpdated = updateTime;
     currentData.ipAddresses = ipv4List;
     
-    // Calculate and save next update time
-    const intervalMs = currentData.updateInterval * 60 * 1000;
-    const newNextUpdateTime = now + intervalMs;
-    currentData.nextUpdateTime = newNextUpdateTime;
-    
     // Write updated data
     writeFileSync(ipDataPath, JSON.stringify(currentData, null, 2), 'utf-8');
-    
-    // Update server state
-    nextUpdateTime = newNextUpdateTime;
     
     // Write last update time
     writeFileSync(resolve(publicDir, 'last-update.txt'), updateTime, 'utf-8');
     
-    // Notify clients with nextUpdateTime
-    notifyClients({
-      type: 'update',
-      lastUpdated: updateTime,
-      nextUpdateTime: newNextUpdateTime
-    });
-    
-    console.log('Background task: Update completed successfully');
-    console.log(`Next update scheduled for: ${new Date(newNextUpdateTime).toISOString()}`);
+    console.log('Manual update: Update completed successfully');
     
   } catch (error) {
-    console.error('Background task: Error updating IP addresses:', error.message);
-  } finally {
-    // Always schedule the next update
-    scheduleNextUpdate();
+    console.error('Manual update: Error updating IP addresses:', error.message);
+    throw error;
   }
 }
-
-// Function to schedule the next update with drift correction
-function scheduleNextUpdate() {
-  // Clear existing timer
-  if (updateTimer !== null) {
-    clearTimeout(updateTimer);
-    updateTimer = null;
-  }
-  
-  const now = Date.now();
-  
-  // If nextUpdateTime is in the past or not set, calculate a new one
-  if (nextUpdateTime <= now) {
-    const intervalMs = currentUpdateInterval * 60 * 1000;
-    nextUpdateTime = now + intervalMs;
-    saveNextUpdateTime(nextUpdateTime);
-  }
-  
-  // Calculate delay until next update
-  const delay = Math.max(1000, nextUpdateTime - now); // At least 1 second delay
-  
-  console.log(`Background task: Next update scheduled for ${new Date(nextUpdateTime).toISOString()}`);
-  console.log(`Background task: Delay until next update: ${delay}ms`);
-  
-  // Schedule next update
-  updateTimer = setTimeout(async () => {
-    await updateIPAddresses();
-  }, delay);
-}
-
-// Function to set up the update timer
-function setupUpdateTimer(interval) {
-  // Validate and set interval
-  interval = Math.max(1, parseInt(interval, 10));
-  currentUpdateInterval = interval;
-  
-  console.log(`Background task: Update interval set to ${interval} minutes`);
-  
-  // Load existing nextUpdateTime or calculate new one
-  loadNextUpdateTime();
-  
-  // Schedule the update
-  scheduleNextUpdate();
-  
-  return true;
-}
-
-// Check for settings in ipData.json and apply them
-try {
-  const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-  if (ipData.updateInterval && typeof ipData.updateInterval === 'number') {
-    currentUpdateInterval = ipData.updateInterval;
-  }
-  // Load the nextUpdateTime from storage
-  loadNextUpdateTime();
-} catch (error) {
-  console.log('Using default update interval and calculating new nextUpdateTime');
-  const now = Date.now();
-  const intervalMs = currentUpdateInterval * 60 * 1000;
-  nextUpdateTime = now + intervalMs;
-  saveNextUpdateTime(nextUpdateTime);
-}
-
-// Schedule regular updates
-setupUpdateTimer(currentUpdateInterval);
 
 // Middleware to parse JSON
 app.use(express.json());
@@ -359,14 +200,6 @@ app.post('/api/trigger-update', async (req, res) => {
   try {
     console.log('Manual update triggered by user');
     
-    // Check if an update is already in progress
-    if (lastUpdateTime && (Date.now() - lastUpdateTime) < MIN_UPDATE_INTERVAL) {
-      return res.status(429).json({ 
-        error: 'Update already in progress or too recent',
-        lastUpdated: new Date(lastUpdateTime).toISOString()
-      });
-    }
-    
     // Trigger the update function
     await updateIPAddresses();
     
@@ -385,89 +218,6 @@ app.post('/api/trigger-update', async (req, res) => {
     });
   }
 });
-app.post('/api/update-interval', (req, res) => {
-  try {
-    const { interval, autoUpdateEnabled } = req.body;
-    console.log('Received update request:', { interval, autoUpdateEnabled });
-    
-    // Read current data
-    let ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    
-    // Update interval if provided
-    if (typeof interval === 'number' && interval >= 1) {
-      console.log(`Updating interval to ${interval} minutes`);
-      ipData.updateInterval = interval;
-      currentUpdateInterval = interval;
-      
-      // Calculate new nextUpdateTime based on new interval
-      const now = Date.now();
-      const intervalMs = interval * 60 * 1000;
-      const newNextUpdateTime = now + intervalMs;
-      ipData.nextUpdateTime = newNextUpdateTime;
-      nextUpdateTime = newNextUpdateTime;
-      
-      // Set up new timer with validated interval
-      if (!setupUpdateTimer(interval)) {
-        throw new Error('Failed to update timer interval');
-      }
-      
-      // Notify clients about the interval change with new nextUpdateTime
-      notifyClients({
-        type: 'settingsChange',
-        updateInterval: interval,
-        nextUpdateTime: newNextUpdateTime
-      });
-    }
-    
-    // Update auto-update setting if provided
-    if (typeof autoUpdateEnabled === 'boolean') {
-      console.log(`Updating autoUpdateEnabled to ${autoUpdateEnabled}`);
-      ipData.autoUpdateEnabled = autoUpdateEnabled;
-      
-      // If enabling auto-update and it's been a while, trigger an update
-      if (autoUpdateEnabled) {
-        const now = Date.now();
-        const timeSinceLastUpdate = now - lastUpdateTime;
-        if (timeSinceLastUpdate >= MIN_UPDATE_INTERVAL) {
-          console.log('Triggering update after enabling auto-update');
-          updateIPAddresses();
-        } else {
-          console.log(`Skipping update, last update was ${timeSinceLastUpdate}ms ago`);
-        }
-      }
-      
-      // Notify clients about the setting change
-      notifyClients({
-        type: 'settingsChange',
-        autoUpdateEnabled,
-        nextUpdateTime: nextUpdateTime
-      });
-    }
-    
-    // Save updated settings
-    writeFileSync(ipDataPath, JSON.stringify(ipData, null, 2), 'utf-8');
-    
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error updating settings:', error);
-    res.status(500).json({ error: 'Failed to update settings' });
-  }
-});
-
-app.get('/api/settings', (req, res) => {
-  try {
-    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    res.json({
-      updateInterval: ipData.updateInterval || DEFAULT_UPDATE_INTERVAL,
-      autoUpdateEnabled: ipData.autoUpdateEnabled !== undefined ? ipData.autoUpdateEnabled : true,
-      nextUpdateTime: nextUpdateTime // Include server's authoritative nextUpdateTime
-    });
-  } catch (error) {
-    console.error('Error reading settings:', error);
-    res.status(500).json({ error: 'Failed to get settings' });
-  }
-});
-
 app.get('/api/changelog', (req, res) => {
   try {
     const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
@@ -476,61 +226,6 @@ app.get('/api/changelog', (req, res) => {
     console.error('Error getting changelog:', error);
     res.status(500).json({ error: 'Failed to get changelog' });
   }
-});
-
-app.post('/api/update-changelog', (req, res) => {
-  try {
-    const { entry } = req.body;
-    if (!entry) {
-      return res.status(400).json({ error: 'Invalid changelog entry' });
-    }
-    
-    // Read current data
-    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    
-    // Add new entry to the start of changelog
-    const newChangelog = [entry, ...(ipData.changelog || [])];
-    
-    // Keep only the 10 most recent entries
-    ipData.changelog = newChangelog.slice(0, 10);
-    
-    // Write back to file
-    writeFileSync(ipDataPath, JSON.stringify(ipData, null, 2), 'utf-8');
-    
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error updating changelog:', error);
-    res.status(500).json({ error: 'Failed to update changelog' });
-  }
-});
-
-// Handle SSE connections
-app.get('/api/updates', (req, res) => {
-  const headers = {
-    'Content-Type': 'text/event-stream',
-    'Connection': 'keep-alive',
-    'Cache-Control': 'no-cache'
-  };
-  
-  res.writeHead(200, headers);
-  
-  // Send initial connection message with current nextUpdateTime
-  const data = JSON.stringify({ 
-    type: 'connected',
-    currentSettings: {
-      updateInterval: currentUpdateInterval,
-      nextUpdateTime: nextUpdateTime
-    }
-  });
-  res.write(`data: ${data}\n\n`);
-  
-  // Add client to set
-  sseClients.add(res);
-  
-  // Remove client on disconnect
-  req.on('close', () => {
-    sseClients.delete(res);
-  });
 });
 
 // Serve static files
@@ -544,6 +239,4 @@ app.get('*', (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Background updates scheduled every ${currentUpdateInterval} minutes`);
-  console.log(`Next update: ${new Date(nextUpdateTime).toISOString()}`);
 });
