@@ -54,7 +54,8 @@ const PORT = process.env.PORT || 3000;
 const corsProxies = [
   'https://corsproxy.io/?',
   'https://proxy.cors.sh/',
-  'https://api.allorigins.win/raw?url='
+  'https://api.allorigins.win/raw?url=',
+  'https://cors-proxy.htmldriven.com/?url='
 ];
 
 // Connected SSE clients
@@ -75,20 +76,7 @@ function notifyClients(message) {
 // Function to save nextUpdateTime to persistent storage
 function saveNextUpdateTime(nextTime) {
   try {
-    let ipData;
-    try {
-      ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    } catch (readError) {
-      // If file doesn't exist or is corrupted, create default structure
-      ipData = {
-        lastUpdated: new Date().toISOString(),
-        ipAddresses: [],
-        updateInterval: DEFAULT_UPDATE_INTERVAL,
-        autoUpdateEnabled: true,
-        changelog: []
-      };
-    }
-    
+    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
     ipData.nextUpdateTime = nextTime;
     writeFileSync(ipDataPath, JSON.stringify(ipData, null, 2), 'utf-8');
     nextUpdateTime = nextTime;
@@ -101,18 +89,7 @@ function saveNextUpdateTime(nextTime) {
 // Function to load nextUpdateTime from persistent storage
 function loadNextUpdateTime() {
   try {
-    let ipData;
-    try {
-      ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    } catch (readError) {
-      console.log('No existing ipData.json found, will create new one');
-      const now = Date.now();
-      const intervalMs = currentUpdateInterval * 60 * 1000;
-      nextUpdateTime = now + intervalMs;
-      saveNextUpdateTime(nextUpdateTime);
-      return nextUpdateTime;
-    }
-    
+    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
     if (ipData.nextUpdateTime && typeof ipData.nextUpdateTime === 'number') {
       nextUpdateTime = ipData.nextUpdateTime;
       console.log(`Loaded next update time: ${new Date(nextUpdateTime).toISOString()}`);
@@ -179,7 +156,9 @@ async function updateIPAddresses() {
       for (const proxy of corsProxies) {
         try {
           let proxyUrl;
-          if (proxy === 'https://corsproxy.io/?') {
+          if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
+            proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}&key=&mime=text/plain`;
+          } else if (proxy === 'https://corsproxy.io/?') {
             proxyUrl = `${proxy}${STARLINK_CSV_URL}`;
           } else {
             proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}`;
@@ -189,7 +168,12 @@ async function updateIPAddresses() {
           
           if (!response.ok) continue;
           
-          csvText = await response.text();
+          if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
+            const data = await response.json();
+            csvText = data.contents;
+          } else {
+            csvText = await response.text();
+          }
           
           if (csvText) {
             console.log('Background task: Successfully fetched data through proxy');
@@ -339,22 +323,14 @@ function setupUpdateTimer(interval) {
 
 // Check for settings in ipData.json and apply them
 try {
-  if (existsSync(ipDataPath)) {
-    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    if (ipData.updateInterval && typeof ipData.updateInterval === 'number') {
-      currentUpdateInterval = ipData.updateInterval;
-    }
-    // Load the nextUpdateTime from storage
-    loadNextUpdateTime();
-  } else {
-    console.log('No ipData.json found, using defaults and calculating new nextUpdateTime');
-    const now = Date.now();
-    const intervalMs = currentUpdateInterval * 60 * 1000;
-    nextUpdateTime = now + intervalMs;
-    saveNextUpdateTime(nextUpdateTime);
+  const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
+  if (ipData.updateInterval && typeof ipData.updateInterval === 'number') {
+    currentUpdateInterval = ipData.updateInterval;
   }
+  // Load the nextUpdateTime from storage
+  loadNextUpdateTime();
 } catch (error) {
-  console.log('Error reading ipData.json, using defaults:', error.message);
+  console.log('Using default update interval and calculating new nextUpdateTime');
   const now = Date.now();
   const intervalMs = currentUpdateInterval * 60 * 1000;
   nextUpdateTime = now + intervalMs;
@@ -449,18 +425,7 @@ app.post('/api/update-interval', (req, res) => {
 
 app.get('/api/settings', (req, res) => {
   try {
-    let ipData;
-    try {
-      ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    } catch (readError) {
-      // Return defaults if file doesn't exist
-      return res.json({
-        updateInterval: DEFAULT_UPDATE_INTERVAL,
-        autoUpdateEnabled: true,
-        nextUpdateTime: nextUpdateTime || Date.now() + (DEFAULT_UPDATE_INTERVAL * 60 * 1000)
-      });
-    }
-    
+    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
     res.json({
       updateInterval: ipData.updateInterval || DEFAULT_UPDATE_INTERVAL,
       autoUpdateEnabled: ipData.autoUpdateEnabled !== undefined ? ipData.autoUpdateEnabled : true,
@@ -474,13 +439,7 @@ app.get('/api/settings', (req, res) => {
 
 app.get('/api/changelog', (req, res) => {
   try {
-    let ipData;
-    try {
-      ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    } catch (readError) {
-      return res.json({ changelog: [] });
-    }
-    
+    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
     res.json({ changelog: ipData.changelog || [] });
   } catch (error) {
     console.error('Error getting changelog:', error);
@@ -516,11 +475,6 @@ app.post('/api/update-changelog', (req, res) => {
 
 // Handle SSE connections
 app.get('/api/updates', (req, res) => {
-  // Set CORS headers for SSE
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET');
-  res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
-  
   const headers = {
     'Content-Type': 'text/event-stream',
     'Connection': 'keep-alive',
@@ -530,55 +484,22 @@ app.get('/api/updates', (req, res) => {
   res.writeHead(200, headers);
   
   // Send initial connection message with current nextUpdateTime
-  try {
-    const data = JSON.stringify({ 
-      type: 'connected',
-      currentSettings: {
-        updateInterval: currentUpdateInterval,
-        nextUpdateTime: nextUpdateTime || Date.now() + (currentUpdateInterval * 60 * 1000)
-      }
-    });
-    res.write(`data: ${data}\n\n`);
-  } catch (error) {
-    console.error('Error sending initial SSE message:', error);
-  }
+  const data = JSON.stringify({ 
+    type: 'connected',
+    currentSettings: {
+      updateInterval: currentUpdateInterval,
+      nextUpdateTime: nextUpdateTime
+    }
+  });
+  res.write(`data: ${data}\n\n`);
   
   // Add client to set
   sseClients.add(res);
   
   // Remove client on disconnect
   req.on('close', () => {
-    console.log('SSE client disconnected');
     sseClients.delete(res);
   });
-  
-  req.on('error', (error) => {
-    console.error('SSE connection error:', error);
-    sseClients.delete(res);
-  });
-});
-
-// Serve IP addresses as plain text
-app.get('/ipv4', (req, res) => {
-  try {
-    let ipData;
-    try {
-      ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    } catch (readError) {
-      return res.status(404).type('text/plain').send('No IP data available');
-    }
-    
-    const ipAddresses = ipData.ipAddresses || [];
-    if (ipAddresses.length === 0) {
-      return res.status(404).type('text/plain').send('No IP addresses found');
-    }
-    
-    // Set content type to plain text and send IP addresses
-    res.type('text/plain').send(ipAddresses.join('\n'));
-  } catch (error) {
-    console.error('Error serving IP addresses:', error);
-    res.status(500).type('text/plain').send('Error retrieving IP addresses');
-  }
 });
 
 // Serve static files

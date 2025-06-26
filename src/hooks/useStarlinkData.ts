@@ -377,124 +377,90 @@ export const useStarlinkData = () => {
 
   // Set up SSE connection for real-time updates
   useEffect(() => {
-    let reconnectTimeout: number | null = null;
-    
-    const setupSSE = () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
+    try {
+      const eventSource = new EventSource('/api/updates');
+      eventSourceRef.current = eventSource;
       
-      try {
-        console.log('Setting up SSE connection...');
-        const eventSource = new EventSource('/api/updates');
-        eventSourceRef.current = eventSource;
-        
-        eventSource.onopen = () => {
-          setSseConnected(true);
-          console.log('SSE connection established');
+      eventSource.onopen = () => {
+        setSseConnected(true);
+        console.log('SSE connection established');
+      };
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('SSE message received:', data);
           
-          // Clear any pending reconnection
-          if (reconnectTimeout) {
-            clearTimeout(reconnectTimeout);
-            reconnectTimeout = null;
-          }
-        };
-        
-        eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            console.log('SSE message received:', data);
+          if (data.type === 'update') {
+            const now = Date.now();
+            const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
             
-            if (data.type === 'update') {
-              const now = Date.now();
-              const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
-              
-              if (timeSinceLastUpdate >= MIN_UPDATE_INTERVAL) {
-                lastUpdateTimeRef.current = now;
-                if (data.lastUpdated) {
-                  setLastUpdated(data.lastUpdated);
-                  localStorage.setItem('lastUpdated', data.lastUpdated);
-                }
-                if (data.nextUpdateTime) {
-                  console.log(`Client: Received new nextUpdateTime from server: ${new Date(data.nextUpdateTime).toISOString()}`);
-                  setNextUpdateTime(data.nextUpdateTime);
-                }
-                loadLatestDataFromServer(false);
-              } else {
-                console.log(`Ignoring update, last update was ${timeSinceLastUpdate}ms ago`);
+            if (timeSinceLastUpdate >= MIN_UPDATE_INTERVAL) {
+              lastUpdateTimeRef.current = now;
+              if (data.lastUpdated) {
+                setLastUpdated(data.lastUpdated);
+                localStorage.setItem('lastUpdated', data.lastUpdated);
               }
-            }
-            
-            if (data.type === 'settingsChange') {
-              console.log('Client: Received settings change from server:', data);
-              if (data.updateInterval !== undefined) {
-                setUpdateInterval(data.updateInterval);
-              }
-              
-              if (data.autoUpdateEnabled !== undefined) {
-                setAutoUpdateEnabled(data.autoUpdateEnabled);
-              }
-              
-              if (data.nextUpdateTime !== undefined) {
-                console.log(`Client: Settings change - new nextUpdateTime: ${new Date(data.nextUpdateTime).toISOString()}`);
+              if (data.nextUpdateTime) {
+                console.log(`Client: Received new nextUpdateTime from server: ${new Date(data.nextUpdateTime).toISOString()}`);
                 setNextUpdateTime(data.nextUpdateTime);
               }
+              loadLatestDataFromServer(false);
+            } else {
+              console.log(`Ignoring update, last update was ${timeSinceLastUpdate}ms ago`);
+            }
+          }
+          
+          if (data.type === 'settingsChange') {
+            console.log('Client: Received settings change from server:', data);
+            if (data.updateInterval !== undefined) {
+              setUpdateInterval(data.updateInterval);
             }
             
-            if (data.type === 'connected' && data.currentSettings) {
-              console.log('Client: Connected to SSE, received current settings:', data.currentSettings);
-              if (data.currentSettings.updateInterval !== undefined) {
-                setUpdateInterval(data.currentSettings.updateInterval);
-              }
-              if (data.currentSettings.nextUpdateTime !== undefined) {
-                console.log(`Client: Initial sync - nextUpdateTime: ${new Date(data.currentSettings.nextUpdateTime).toISOString()}`);
-                setNextUpdateTime(data.currentSettings.nextUpdateTime);
-              }
+            if (data.autoUpdateEnabled !== undefined) {
+              setAutoUpdateEnabled(data.autoUpdateEnabled);
             }
-          } catch (error) {
-            console.error('Error parsing SSE message:', error);
+            
+            if (data.nextUpdateTime !== undefined) {
+              console.log(`Client: Settings change - new nextUpdateTime: ${new Date(data.nextUpdateTime).toISOString()}`);
+              setNextUpdateTime(data.nextUpdateTime);
+            }
           }
-        };
-        
-        eventSource.onerror = (error) => {
-          console.log('SSE connection error - will reconnect automatically', error);
-          setSseConnected(false);
           
-          // Close current connection
-          eventSource.close();
-          
-          // Schedule reconnection
-          if (!reconnectTimeout) {
-            reconnectTimeout = window.setTimeout(() => {
-              console.log('Attempting to reconnect SSE...');
-              setupSSE();
-            }, 5000);
+          if (data.type === 'connected' && data.currentSettings) {
+            console.log('Client: Connected to SSE, received current settings:', data.currentSettings);
+            if (data.currentSettings.updateInterval !== undefined) {
+              setUpdateInterval(data.currentSettings.updateInterval);
+            }
+            if (data.currentSettings.nextUpdateTime !== undefined) {
+              console.log(`Client: Initial sync - nextUpdateTime: ${new Date(data.currentSettings.nextUpdateTime).toISOString()}`);
+              setNextUpdateTime(data.currentSettings.nextUpdateTime);
+            }
           }
-        };
-      } catch (err) {
-        console.error('Error setting up SSE connection:', err);
+        } catch (error) {
+          console.error('Error parsing SSE message:', error);
+        }
+      };
+      
+      eventSource.onerror = () => {
+        console.log('SSE connection error - will reconnect automatically');
         setSseConnected(false);
         
-        // Schedule reconnection on setup error
-        if (!reconnectTimeout) {
-          reconnectTimeout = window.setTimeout(() => {
-            console.log('Retrying SSE setup...');
-            setupSSE();
-          }, 5000);
-        }
-      }
-    };
-    
-    // Initial setup
-    setupSSE();
+        setTimeout(() => {
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = new EventSource('/api/updates');
+          }
+        }, 5000);
+      };
+    } catch (err) {
+      console.error('Error setting up SSE connection:', err);
+      setSseConnected(false);
+    }
     
     return () => {
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-      }
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
-        eventSourceRef.current = null;
       }
       if (successTimeoutRef.current !== null) {
         window.clearTimeout(successTimeoutRef.current);
@@ -527,12 +493,7 @@ export const useStarlinkData = () => {
     
     // Fetch server settings including nextUpdateTime
     fetch('/api/settings')
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        return res.json();
-      })
+      .then(res => res.json())
       .then(settings => {
         console.log('Client: Fetched initial settings from server:', settings);
         if (settings.updateInterval) {
@@ -546,14 +507,7 @@ export const useStarlinkData = () => {
           setNextUpdateTime(settings.nextUpdateTime);
         }
       })
-      .catch(error => {
-        console.error('Error fetching initial settings:', error);
-        // Set a fallback nextUpdateTime if server fetch fails
-        if (!nextUpdateTime) {
-          const fallbackTime = Date.now() + (updateInterval * 60 * 1000);
-          setNextUpdateTime(fallbackTime);
-        }
-      });
+      .catch(console.error);
     
     return () => {
       window.removeEventListener('storage', handleStorageChange);
@@ -566,9 +520,6 @@ export const useStarlinkData = () => {
     const newState = !autoUpdateEnabled;
     console.log(`Client: Toggling auto-update to ${newState}`);
     
-    // Optimistically update the UI
-    setAutoUpdateEnabled(newState);
-    
     fetch('/api/update-interval', {
       method: 'POST',
       headers: {
@@ -577,8 +528,6 @@ export const useStarlinkData = () => {
       body: JSON.stringify({ autoUpdateEnabled: newState })
     }).catch(err => {
       console.error('Error updating auto-update setting:', err);
-      // Revert on error
-      setAutoUpdateEnabled(!newState);
     });
   };
 
