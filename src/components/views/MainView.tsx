@@ -77,17 +77,15 @@ export const MainView: React.FC<MainViewProps> = ({
   useEffect(() => {
     const updateCountdown = () => {
       const now = Date.now();
-      
-      // Only show countdown if we have a valid nextUpdateTime from server
-      if (!nextUpdateTime || nextUpdateTime <= 0) {
-        setTimeUntilUpdate('Syncing...');
-        return;
-      }
-      
       const timeLeft = Math.max(0, nextUpdateTime - now);
       
       if (timeLeft === 0) {
-        setTimeUntilUpdate('Updating...');
+        if (isLoading) { 
+          setTimeUntilUpdate('Updating...');
+        } else {
+          // Trigger fetch and reset timer
+          onRefresh();
+        }
         return;
       }
       
@@ -107,7 +105,7 @@ export const MainView: React.FC<MainViewProps> = ({
     const interval = setInterval(updateCountdown, 1000);
     
     return () => clearInterval(interval);
-  }, [nextUpdateTime, isLoading, updateInterval]);
+  }, [nextUpdateTime, isLoading, onRefresh, updateInterval]);
 
   return (
     <div className="min-h-screen bg-black bg-opacity-95 text-white">

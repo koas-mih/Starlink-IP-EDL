@@ -29,7 +29,7 @@ export const useStarlinkData = () => {
   const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
   const [showChangelog, setShowChangelog] = useState(false);
   const [sseConnected, setSseConnected] = useState(false);
-  const [nextUpdateTime, setNextUpdateTime] = useState<number>(0); // Server-authoritative
+  const [nextUpdateTime, setNextUpdateTime] = useState<number>(0); // Will be set by server
   
   const eventSourceRef = useRef<EventSource | null>(null);
   const isFetchingRef = useRef(false);
@@ -315,7 +315,6 @@ export const useStarlinkData = () => {
   const updateIntervalSettings = useCallback(async (minutes: number) => {
     if (minutes >= 1) {
       try {
-        console.log(`Client: Updating interval to ${minutes} minutes`);
         const response = await fetch('/api/update-interval', {
           method: 'POST',
           headers: {
@@ -325,8 +324,8 @@ export const useStarlinkData = () => {
         });
         
         if (response.ok) {
-          // Don't update local state here - wait for server response via SSE
-          console.log(`Client: Interval update request sent successfully`);
+          setUpdateInterval(minutes);
+          console.log(`Interval updated to ${minutes} minutes`);
         } else {
           const error = await response.json();
           console.error('Error updating interval:', error);
@@ -389,7 +388,6 @@ export const useStarlinkData = () => {
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('SSE message received:', data);
           
           if (data.type === 'update') {
             const now = Date.now();
@@ -399,10 +397,8 @@ export const useStarlinkData = () => {
               lastUpdateTimeRef.current = now;
               if (data.lastUpdated) {
                 setLastUpdated(data.lastUpdated);
-                localStorage.setItem('lastUpdated', data.lastUpdated);
               }
               if (data.nextUpdateTime) {
-                console.log(`Client: Received new nextUpdateTime from server: ${new Date(data.nextUpdateTime).toISOString()}`);
                 setNextUpdateTime(data.nextUpdateTime);
               }
               loadLatestDataFromServer(false);
@@ -412,28 +408,24 @@ export const useStarlinkData = () => {
           }
           
           if (data.type === 'settingsChange') {
-            console.log('Client: Received settings change from server:', data);
             if (data.updateInterval !== undefined) {
               setUpdateInterval(data.updateInterval);
             }
             
-            if (data.autoUpdateEnabled !== undefined) {
+            if (data.autoUpdateEnabled !== undefined && data.autoUpdateEnabled !== autoUpdateEnabled) {
               setAutoUpdateEnabled(data.autoUpdateEnabled);
             }
             
             if (data.nextUpdateTime !== undefined) {
-              console.log(`Client: Settings change - new nextUpdateTime: ${new Date(data.nextUpdateTime).toISOString()}`);
               setNextUpdateTime(data.nextUpdateTime);
             }
           }
           
           if (data.type === 'connected' && data.currentSettings) {
-            console.log('Client: Connected to SSE, received current settings:', data.currentSettings);
             if (data.currentSettings.updateInterval !== undefined) {
               setUpdateInterval(data.currentSettings.updateInterval);
             }
             if (data.currentSettings.nextUpdateTime !== undefined) {
-              console.log(`Client: Initial sync - nextUpdateTime: ${new Date(data.currentSettings.nextUpdateTime).toISOString()}`);
               setNextUpdateTime(data.currentSettings.nextUpdateTime);
             }
           }
@@ -467,7 +459,7 @@ export const useStarlinkData = () => {
         successTimeoutRef.current = null;
       }
     };
-  }, []);
+  }, [autoUpdateEnabled]);
 
   // Listen for storage events from other tabs/windows and fetch server settings
   useEffect(() => {
@@ -495,7 +487,6 @@ export const useStarlinkData = () => {
     fetch('/api/settings')
       .then(res => res.json())
       .then(settings => {
-        console.log('Client: Fetched initial settings from server:', settings);
         if (settings.updateInterval) {
           setUpdateInterval(settings.updateInterval);
         }
@@ -503,8 +494,8 @@ export const useStarlinkData = () => {
           setAutoUpdateEnabled(settings.autoUpdateEnabled);
         }
         if (settings.nextUpdateTime) {
-          console.log(`Client: Initial settings fetch - nextUpdateTime: ${new Date(settings.nextUpdateTime).toISOString()}`);
           setNextUpdateTime(settings.nextUpdateTime);
+          console.log(`Client synchronized with server nextUpdateTime: ${new Date(settings.nextUpdateTime).toISOString()}`);
         }
       })
       .catch(console.error);
@@ -518,7 +509,7 @@ export const useStarlinkData = () => {
   // Toggle auto-update function
   const toggleAutoUpdate = () => {
     const newState = !autoUpdateEnabled;
-    console.log(`Client: Toggling auto-update to ${newState}`);
+    setAutoUpdateEnabled(newState);
     
     fetch('/api/update-interval', {
       method: 'POST',

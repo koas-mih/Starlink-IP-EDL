@@ -64,12 +64,7 @@ const sseClients = new Set();
 // Function to notify all connected clients of updates
 function notifyClients(message) {
   sseClients.forEach(client => {
-    try {
-      client.write(`data: ${JSON.stringify(message)}\n\n`);
-    } catch (error) {
-      console.error('Error sending SSE message:', error);
-      sseClients.delete(client);
-    }
+    client.write(`data: ${JSON.stringify(message)}\n\n`);
   });
 }
 
