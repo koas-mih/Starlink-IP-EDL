@@ -3,240 +3,263 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
-import { promisify } from 'util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const writeFileAsync = promisify(writeFileSync);
-
-// Initialize directories
-const publicDir = resolve(__dirname, 'public');
-if (!existsSync(publicDir)) {
-  mkdirSync(publicDir, { recursive: true });
-}
-
-const dataDir = resolve(__dirname, 'data');
-if (!existsSync(dataDir)) {
-  mkdirSync(dataDir, { recursive: true });
-}
-
-const ipFilePath = resolve(publicDir, 'ipv4.txt');
-const ipDataPath = resolve(dataDir, 'ipData.json');
-
-// Ensure ipData.json exists
-if (!existsSync(ipDataPath)) {
-  writeFileSync(ipDataPath, JSON.stringify({
-    lastUpdated: new Date().toISOString(),
-    ipAddresses: [],
-    changelog: []
-  }, null, 2), 'utf-8');
-}
 
 // Initialize Express
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Setup directories and file paths
+const publicDir = resolve(__dirname, 'public');
+const dataDir = resolve(__dirname, 'data');
+
+if (!existsSync(publicDir)) {
+  mkdirSync(publicDir, { recursive: true });
+}
+
+if (!existsSync(dataDir)) {
+  mkdirSync(dataDir, { recursive: true });
+}
+
+const ipFilePath = resolve(publicDir, 'ipv4.txt');
+const dataFilePath = resolve(dataDir, 'starlink-data.json');
+
+// Initialize data file if it doesn't exist
+const initializeDataFile = () => {
+  if (!existsSync(dataFilePath)) {
+    const initialData = {
+      ipAddresses: [],
+      lastUpdated: null,
+      changelog: []
+    };
+    writeFileSync(dataFilePath, JSON.stringify(initialData, null, 2));
+  }
+};
+
+// Read data from file
+const readData = () => {
+  try {
+    initializeDataFile();
+    const data = readFileSync(dataFilePath, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('Error reading data file:', error);
+    return { ipAddresses: [], lastUpdated: null, changelog: [] };
+  }
+};
+
+// Write data to file
+const writeData = (data) => {
+  try {
+    writeFileSync(dataFilePath, JSON.stringify(data, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Error writing data file:', error);
+    return false;
+  }
+};
+
+// CORS proxies for fetching data
 const corsProxies = [
   'https://corsproxy.io/?',
-  'https://proxy.cors.sh/',
   'https://api.allorigins.win/raw?url=',
   'https://cors-proxy.htmldriven.com/?url='
 ];
 
-// Function to fetch and update IP addresses
-async function updateIPAddresses() {
-  console.log('Manual update: Starting IP address update...');
+// Fetch Starlink data
+const fetchStarlinkData = async () => {
+  const STARLINK_URL = 'https://geoip.starlinkisp.net/feed.csv';
   
+  console.log('Fetching Starlink data...');
+  
+  // Try direct fetch first
   try {
-    // Read current settings
-    const currentData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
+    const response = await fetch(STARLINK_URL, {
+      headers: {
+        'Accept': 'text/csv,text/plain,*/*',
+        'User-Agent': 'Mozilla/5.0 (compatible; StarlinkIPExtractor/1.0)'
+      }
+    });
     
-    const STARLINK_CSV_URL = 'https://geoip.starlinkisp.net/feed.csv';
-    
-    // Try direct fetch first
-    let csvText = '';
+    if (response.ok) {
+      const csvText = await response.text();
+      console.log('Direct fetch successful');
+      return csvText;
+    }
+  } catch (error) {
+    console.log('Direct fetch failed:', error.message);
+  }
+  
+  // Try CORS proxies
+  for (const proxy of corsProxies) {
     try {
-      console.log('Manual update: Attempting direct fetch...');
-      const response = await fetch(STARLINK_CSV_URL, {
+      let proxyUrl;
+      
+      if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
+        proxyUrl = `${proxy}${encodeURIComponent(STARLINK_URL)}&key=&mime=text/plain`;
+      } else {
+        proxyUrl = `${proxy}${encodeURIComponent(STARLINK_URL)}`;
+      }
+      
+      const response = await fetch(proxyUrl, {
         headers: {
-          'Accept': 'text/plain,text/csv,*/*',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          'Accept': 'text/csv,text/plain,*/*',
+          'User-Agent': 'Mozilla/5.0 (compatible; StarlinkIPExtractor/1.0)'
         }
       });
       
       if (response.ok) {
-        csvText = await response.text();
-        console.log('Manual update: Direct fetch successful');
-      }
-    } catch (directError) {
-      console.log('Manual update: Direct fetch failed:', directError);
-    }
-    
-    // If direct fetch failed, try proxies
-    if (!csvText) {
-      console.log('Manual update: Trying CORS proxies...');
-      for (const proxy of corsProxies) {
-        try {
-          let proxyUrl;
-          if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-            proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}&key=&mime=text/plain`;
-          } else if (proxy === 'https://corsproxy.io/?') {
-            proxyUrl = `${proxy}${STARLINK_CSV_URL}`;
-          } else {
-            proxyUrl = `${proxy}${encodeURIComponent(STARLINK_CSV_URL)}`;
-          }
-          
-          const response = await fetch(proxyUrl, {
-            headers: {
-              'Accept': 'text/plain,text/csv,*/*',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-          });
-          
-          if (!response.ok) continue;
-          
-          if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
-            const data = await response.json();
-            csvText = data.contents;
-          } else {
-            csvText = await response.text();
-          }
-          
-          if (csvText) {
-            console.log('Manual update: Successfully fetched data through proxy');
-            break;
-          }
-        } catch (error) {
-          console.log(`Manual update: Proxy failed:`, error);
-          continue;
+        let csvText;
+        
+        if (proxy === 'https://cors-proxy.htmldriven.com/?url=') {
+          const jsonData = await response.json();
+          csvText = jsonData.contents;
+        } else {
+          csvText = await response.text();
+        }
+        
+        if (csvText && csvText.length > 0) {
+          console.log(`Proxy fetch successful using: ${proxy}`);
+          return csvText;
         }
       }
+    } catch (error) {
+      console.log(`Proxy ${proxy} failed:`, error.message);
+    }
+  }
+  
+  throw new Error('All fetch methods failed');
+};
+
+// Process CSV data to extract IPv4 addresses
+const processCSVData = (csvText) => {
+  const lines = csvText.split('\n');
+  const ipAddresses = new Set(); // Use Set to avoid duplicates
+  
+  for (const line of lines) {
+    if (line.trim()) {
+      // Match IPv4 CIDR notation
+      const matches = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2})/g);
+      if (matches) {
+        matches.forEach(ip => ipAddresses.add(ip));
+      }
+    }
+  }
+  
+  return Array.from(ipAddresses).sort();
+};
+
+// Update IP addresses and create changelog entry
+const updateIPAddresses = async () => {
+  try {
+    // Fetch and process data
+    const csvText = await fetchStarlinkData();
+    const newIpAddresses = processCSVData(csvText);
+    
+    if (newIpAddresses.length === 0) {
+      throw new Error('No IPv4 addresses found in data');
     }
     
-    if (!csvText) {
-      throw new Error('Manual update: Failed to fetch data from all sources');
-    }
+    // Read current data
+    const currentData = readData();
+    const oldIpAddresses = currentData.ipAddresses || [];
     
-    // Process CSV data
-    const lines = csvText.split('\n');
-    const ipv4List = [];
+    // Create changelog entry if there are changes
+    const oldSet = new Set(oldIpAddresses);
+    const newSet = new Set(newIpAddresses);
     
-    lines.forEach(line => {
-      const cells = line.split(',');
-      cells.forEach(cell => {
-        const match = cell.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2})/);
-        if (match) {
-          ipv4List.push(match[0]);
-        }
-      });
-    });
+    const added = newIpAddresses.filter(ip => !oldSet.has(ip));
+    const removed = oldIpAddresses.filter(ip => !newSet.has(ip));
     
-    if (ipv4List.length === 0) {
-      throw new Error('Manual update: No IPv4 addresses found in data');
-    }
-    
-    // Update files
     const updateTime = new Date().toISOString();
     
-    // Write to ipv4.txt
-    writeFileSync(ipFilePath, ipv4List.join('\n'), 'utf-8');
+    // Update data
+    const updatedData = {
+      ipAddresses: newIpAddresses,
+      lastUpdated: updateTime,
+      changelog: currentData.changelog || []
+    };
     
-    // Update ipData.json
-    const oldIpAddresses = currentData.ipAddresses || [];
-    const oldIpSet = new Set(oldIpAddresses);
-    const newIpSet = new Set(ipv4List);
-    
-    // Find changes
-    const added = ipv4List.filter(ip => !oldIpSet.has(ip));
-    const removed = oldIpAddresses.filter(ip => !newIpSet.has(ip));
-    
-    // Only create changelog entry if there are changes
+    // Add changelog entry if there are changes
     if (added.length > 0 || removed.length > 0) {
-      const entry = {
+      const changelogEntry = {
         date: updateTime,
-        ipAddresses: ipv4List,
+        ipAddresses: newIpAddresses,
         added,
         removed
       };
       
-      // Update changelog (keep only last 10 entries)
-      currentData.changelog = [entry, ...(currentData.changelog || [])].slice(0, 10);
+      updatedData.changelog = [changelogEntry, ...updatedData.changelog].slice(0, 10); // Keep last 10 entries
     }
     
-    // Update data
-    currentData.lastUpdated = updateTime;
-    currentData.ipAddresses = ipv4List;
+    // Save data
+    if (!writeData(updatedData)) {
+      throw new Error('Failed to save data');
+    }
     
-    // Write updated data
-    writeFileSync(ipDataPath, JSON.stringify(currentData, null, 2), 'utf-8');
+    // Write IP addresses to text file
+    writeFileSync(ipFilePath, newIpAddresses.join('\n'));
     
-    // Write last update time
-    writeFileSync(resolve(publicDir, 'last-update.txt'), updateTime, 'utf-8');
+    console.log(`Successfully updated ${newIpAddresses.length} IP addresses`);
     
-    console.log('Manual update: Update completed successfully');
+    return {
+      success: true,
+      count: newIpAddresses.length,
+      added: added.length,
+      removed: removed.length
+    };
     
   } catch (error) {
-    console.error('Manual update: Error updating IP addresses:', error.message);
+    console.error('Error updating IP addresses:', error);
     throw error;
   }
-}
+};
 
-// Middleware to parse JSON
+// Middleware
 app.use(express.json());
 
 // API Routes
-app.get('/api/last-updated', (req, res) => {
+app.get('/api/data', (req, res) => {
   try {
-    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    res.json({ lastUpdated: ipData.lastUpdated });
+    const data = readData();
+    res.json(data);
   } catch (error) {
-    console.error('Error getting last update time:', error);
-    res.status(500).json({ error: 'Failed to get last update time' });
+    res.status(500).json({ error: 'Failed to read data' });
   }
 });
 
-app.post('/api/trigger-update', async (req, res) => {
+app.post('/api/fetch-data', async (req, res) => {
   try {
-    console.log('Manual update triggered by user');
-    
-    // Trigger the update function
-    await updateIPAddresses();
-    
-    // Return success response
-    res.json({ 
-      success: true,
-      message: 'Update triggered successfully',
-      lastUpdated: new Date().toISOString()
-    });
-    
+    const result = await updateIPAddresses();
+    res.json(result);
   } catch (error) {
-    console.error('Error triggering manual update:', error);
     res.status(500).json({ 
-      error: 'Failed to trigger update',
-      message: error.message 
+      success: false,
+      error: error.message 
     });
-  }
-});
-app.get('/api/changelog', (req, res) => {
-  try {
-    const ipData = JSON.parse(readFileSync(ipDataPath, 'utf-8'));
-    res.json({ changelog: ipData.changelog || [] });
-  } catch (error) {
-    console.error('Error getting changelog:', error);
-    res.status(500).json({ error: 'Failed to get changelog' });
   }
 });
 
 // Serve static files
 app.use(express.static(publicDir));
 
-// Handle React Router paths
+// Handle React Router
 app.get('*', (req, res) => {
-  res.sendFile(resolve(publicDir, 'index.html'));
+  const indexPath = resolve(publicDir, 'index.html');
+  if (existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('Not found');
+  }
 });
+
+// Initialize
+initializeDataFile();
 
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log('Starlink IP Extractor ready');
 });

@@ -247,12 +247,8 @@ export const MainView: React.FC<MainViewProps> = ({
               className="mt-4 flex items-center text-sm text-gray-300 bg-gray-800 rounded-lg px-3 py-2"
             >
               <Clock className="h-4 w-4 mr-1 text-blue-400" />
-              <div className="flex flex-col sm:flex-row sm:items-center">
-                <div>
-                  <span className="font-medium">Last updated:</span>
-                  <span className="ml-1">{formatDate(lastUpdated)}</span>
-                </div>
-              </div>
+              <span className="font-medium">Last updated:</span>
+              <span className="ml-1">{formatDate(lastUpdated)}</span>
             </motion.div>
           )}
         </motion.div>
